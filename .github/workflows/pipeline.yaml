@@ -29,6 +29,7 @@ jobs:
         target: 'http://localhost:3000'
         allow_issue_writing: false
         fail_action: false 
+        artifact_name: '' 
 
     - name: Find and Move ZAP Report
       run: |
