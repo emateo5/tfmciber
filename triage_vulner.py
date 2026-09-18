@@ -82,17 +82,20 @@ def analyze_alerts(report_path):
         try:
             print(f"🤖 Procesando triaje de IA para: [{alert_name}]...")
             response = client.chat.completions.create(
-                model="gpt-4o-mini", # Excelente relación calidad-precio para DevSecOps
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "Eres un asistente de seguridad automatizado de caja negra. Tu salida debe ser única y exclusivamente un string JSON válido."},
                     {"role": "user", "content": prompt}
                 ],
-                response_format={ "type": "json_object" } # Forzado estricto nativo de OpenAI
+                response_format={ "type": "json_object" }
             )
             
-            # Convertir respuesta de texto de la IA a JSON nativo de Python
-            ai_decision = json.loads(response.choices.message.content)
-            print(f"   ↳ Veredicto -> ¿Falso Positivo?: {ai_decision['is_false_positive']} | Certeza: {ai_decision['confidence_score']}%")
+            # SOLUCIÓN EXPLICITA: Acceder de forma segura al objeto de la versión moderna de OpenAI
+            ai_response_text = response.choices[0].message.content
+            
+            # Convertir la respuesta de texto estructurado de la IA a formato JSON nativo de Python
+            ai_decision = json.loads(ai_response_text)
+            print(f"   ↳ Veredicto -> ¿Falso Positivo?: {ai_decision.get('is_false_positive')} | Certeza: {ai_decision.get('confidence_score')}%")
             
             # Combinamos la alerta original con el análisis de la IA
             alert["ai_triage"] = ai_decision
