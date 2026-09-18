@@ -51,4 +51,5 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: verified-vulnerabilities-report
-        path: verified_alerts.json
+        path: verified_alerts.html
+        if-no-files-found: error
