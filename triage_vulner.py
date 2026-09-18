@@ -1,9 +1,98 @@
 import json
 import os
 import argparse
+from html import escape
 from openai import OpenAI
 
-def analyze_alerts(report_path):
+
+def _html_value(value):
+    return escape(str("" if value is None else value))
+
+
+def generate_html_report(alerts, output_file):
+        false_positives = sum(
+                alert.get("ai_triage", {}).get("is_false_positive") is True
+                for alert in alerts
+        )
+        high_risk = sum(
+                str(alert.get("riskdesc", "")).lower().startswith("high")
+                for alert in alerts
+        )
+
+        rows = []
+        for alert in alerts:
+                triage = alert.get("ai_triage", {})
+                verdict = triage.get("is_false_positive")
+                verdict_label = "Sí" if verdict is True else "No" if verdict is False else "Sin veredicto"
+                verdict_class = "positive" if verdict is True else "negative" if verdict is False else "unknown"
+                confidence = triage.get("confidence_score", "-")
+                instances = alert.get("instances", [])
+                instance_rows = "".join(
+                        f"<li><strong>URI:</strong> {_html_value(instance.get('uri'))} "
+                        f"<strong>Parámetro:</strong> {_html_value(instance.get('param'))} "
+                        f"<strong>Evidencia:</strong> {_html_value(instance.get('evidence'))}</li>"
+                        for instance in instances[:3]
+                ) or "<li>No hay instancias disponibles.</li>"
+
+                rows.append(f"""
+                <article class="finding">
+                    <div class="finding-header">
+                        <div>
+                            <span class="risk">{_html_value(alert.get('riskdesc', 'No clasificado'))}</span>
+                            <h2>{_html_value(alert.get('alert', 'Desconocida'))}</h2>
+                        </div>
+                        <span class="verdict {verdict_class}">{verdict_label}</span>
+                    </div>
+                    <div class="meta"><span>Confianza: <strong>{_html_value(confidence)}%</strong></span>
+                        <span>Instancias: <strong>{len(instances)}</strong></span></div>
+                    <p>{_html_value(alert.get('desc', 'Sin descripción técnica'))}</p>
+                    <details>
+                        <summary>Ver evidencia detectada</summary>
+                        <ul>{instance_rows}</ul>
+                    </details>
+                    <div class="justification"><strong>Justificación de IA:</strong>
+                        {_html_value(triage.get('justification', 'No disponible'))}</div>
+                </article>
+                """)
+
+        document = f"""<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Reporte de triaje OWASP ZAP</title>
+    <style>
+        :root {{ color-scheme: light; font-family: system-ui, sans-serif; color: #172033; background: #f4f6f8; }}
+        body {{ max-width: 1100px; margin: 0 auto; padding: 32px 20px; }}
+        header {{ margin-bottom: 24px; }} h1 {{ margin-bottom: 6px; }}
+        .summary {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; }}
+        .metric, .finding {{ background: white; border: 1px solid #dce2e8; border-radius: 8px; padding: 18px; box-shadow: 0 2px 8px #1720330d; }}
+        .metric strong {{ display: block; font-size: 1.8rem; margin-top: 4px; }}
+        .finding {{ margin-bottom: 16px; }} .finding-header {{ display: flex; justify-content: space-between; gap: 16px; align-items: start; }}
+        h2 {{ margin: 8px 0; font-size: 1.2rem; }} .risk {{ color: #8b3a00; font-size: .8rem; font-weight: 700; text-transform: uppercase; }}
+        .verdict {{ border-radius: 999px; padding: 6px 10px; font-weight: 700; white-space: nowrap; }}
+        .positive {{ color: #146c43; background: #d9f5e5; }} .negative {{ color: #a61b1b; background: #ffe0e0; }} .unknown {{ color: #56606d; background: #edf0f2; }}
+        .meta {{ display: flex; gap: 20px; color: #56606d; font-size: .9rem; }} p {{ line-height: 1.5; }}
+        details {{ margin: 14px 0; }} summary {{ cursor: pointer; font-weight: 600; }} li {{ margin: 8px 0; overflow-wrap: anywhere; }}
+        .justification {{ border-left: 3px solid #2b6cb0; padding: 10px 12px; background: #f1f6fb; line-height: 1.5; }}
+        @media (max-width: 650px) {{ .summary {{ grid-template-columns: 1fr; }} .finding-header {{ flex-direction: column; }} }}
+    </style>
+</head>
+<body>
+    <header><h1>Reporte de triaje OWASP ZAP</h1><p>Evaluación automatizada de alertas con OpenAI.</p></header>
+    <section class="summary" aria-label="Resumen">
+        <div class="metric">Alertas analizadas<strong>{len(alerts)}</strong></div>
+        <div class="metric">Posibles falsos positivos<strong>{false_positives}</strong></div>
+        <div class="metric">Alertas de alto riesgo<strong>{high_risk}</strong></div>
+    </section>
+    <main>{''.join(rows) or '<p>No se encontraron alertas.</p>'}</main>
+</body>
+</html>
+"""
+        with open(output_file, "w", encoding="utf-8") as out_f:
+                out_f.write(document)
+
+def analyze_alerts(report_path, output_file):
     # Inicializa el cliente oficial de OpenAI leyendo la variable del entorno
     client = OpenAI()
     
@@ -104,16 +193,19 @@ def analyze_alerts(report_path):
         except Exception as e:
             print(f"⚠️ Error al conectar o procesar con OpenAI para la alerta {alert_name}: {e}")
 
-    # Exportar el reporte auditado listo para su consumo
-    output_file = "verified_alerts.json"
-    with open(output_file, 'w', encoding='utf-8') as out_f:
-        json.dump(verified_alerts, out_f, indent=2, ensure_ascii=False)
+    # Exportar el reporte auditado como HTML autocontenido
+    generate_html_report(verified_alerts, output_file)
     
     print(f"\n💾 ¡Triaje completado con éxito! El reporte consolidado se guardó en: {output_file}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="AI Triage Tool para OWASP ZAP")
     parser.add_argument("--report", required=True, help="Nombre o ruta del archivo JSON de ZAP")
+    parser.add_argument(
+        "--output",
+        default="verified_alerts.html",
+        help="Ruta del reporte HTML de salida (por defecto: verified_alerts.html)",
+    )
     args = parser.parse_args()
     
-    analyze_alerts(args.report)
+    analyze_alerts(args.report, args.output)
