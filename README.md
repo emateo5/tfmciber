@@ -14,25 +14,40 @@ El resultado se guarda en `verified_alerts.html`. Para indicar otra ruta:
 python triage_vulner.py --report zap_report.json --output resultados/triage.html
 ```
 
-## Modos de escaneo en GitHub Actions
+## PoC experimental
 
-Los eventos `push` y `pull_request` ejecutan el modo `baseline`, que realiza un
-escaneo pasivo sobre Juice Shop. Para lanzar manualmente un escaneo activo:
+El workflow de GitHub Actions ejecuta SAST y DAST sobre una instancia limpia de
+OWASP Juice Shop. SAST usa Bandit y `pip-audit`; DAST usa OWASP ZAP. Los
+eventos `push` y `pull_request` ejecutan el escenario `baseline` como control
+operativo.
 
-1. Abre **Actions > Automated Vulnerability & AI Triage Scan > Run workflow**.
-2. Selecciona `active` en `scan_mode`.
-3. Ejecuta el workflow únicamente contra una aplicación autorizada.
+Para ejecutar un escenario experimental manualmente:
 
-El modo activo usa [`zap/active-scan.conf`](zap/active-scan.conf) y está
-limitado a SQL Injection, XSS reflejado/DOM y comprobaciones relacionadas con
-tokens CSRF. La comprobación CSRF estándar de ZAP detecta principalmente la
-ausencia de protección anti-CSRF; no sustituye una prueba completa de
-explotación CSRF autenticada.
+1. Abre **Actions > Automatizacion de Escaneo de Vulnerabilidad & Triaje con IA > Run workflow**.
+2. Selecciona `experiment_scenario`.
+3. Ejecuta uno de estos escenarios:
 
-Los artefactos se publican bajo `artifacts/` y se separan por modo:
+| Escenario | Escaneo ZAP | Politica | Triaje IA |
+| --- | --- | --- | --- |
+| `stock` | Active Scan | Predeterminada de ZAP | No |
+| `tuned` | Active Scan | [`zap/active-scan.conf`](zap/active-scan.conf) | No |
+| `tuned-ai` | Active Scan | [`zap/active-scan.conf`](zap/active-scan.conf) | Si |
+| `baseline` | Baseline pasivo | Predeterminada de ZAP | Si |
 
-- `zap-baseline.json` y `verified-baseline.html`
-- `zap-active.json` y `verified-active.html`
+La comparación principal del TFM es `stock` frente a `tuned` frente a
+`tuned-ai`. `tuned` y `tuned-ai` ejecutan exactamente la misma política; la
+única diferencia es el postprocesamiento con IA. La IA ayuda a priorizar y
+revisar falsos positivos, pero no sustituye el resultado bruto de ZAP.
+
+La política afinada incluye SQL Injection, XSS reflejado/DOM y comprobaciones
+relacionadas con tokens CSRF. La comprobación CSRF estándar de ZAP detecta
+principalmente la ausencia de protección anti-CSRF; no sustituye una prueba
+completa de explotación CSRF autenticada.
+
+Los artefactos se publican con el escenario en el nombre, junto con
+`metadata.json`, los resultados SAST y los informes JSON/HTML de ZAP. Para
+comparar ejecuciones deben mantenerse constantes la versión de Juice Shop, la
+imagen de ZAP, el commit y la URL objetivo.
 
 La política activa depende de los identificadores de reglas instalados en la
 imagen de ZAP. Si se cambia la imagen o sus addons, hay que volver a validar

@@ -7,29 +7,44 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
     inputs:
-      scan_mode:
-        description: "Tipo de análisis ZAP"
+      experiment_scenario:
+        description: "Escenario experimental"
         required: true
-        default: baseline
+        default: tuned-ai
         type: choice
         options:
           - baseline
-          - active
+          - stock
+          - tuned
+          - tuned-ai
 
 jobs:
   security-assessment:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      SCAN_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.scan_mode || 'baseline' }}
+      EXPERIMENT_SCENARIO: ${{ github.event_name == 'workflow_dispatch' && inputs.experiment_scenario || 'baseline' }}
       TARGET_URL: http://localhost:3000
+      ZAP_IMAGE: zaproxy/zap-stable
 
     steps:
     - name: Checkout repository code
       uses: actions/checkout@v5
 
+    - name: Run SAST checks
+      run: |
+        mkdir -p artifacts
+        python -m pip install --upgrade pip
+        python -m pip install bandit pip-audit
+        bandit -r . -x .git -f json -o artifacts/sast-bandit.json || bandit_status=$?
+        pip-audit -r requirements.txt -f json -o artifacts/sast-pip-audit.json || pip_audit_status=$?
+        python -m py_compile triage_vulner.py
+        if [ "${bandit_status:-0}" -ne 0 ] || [ "${pip_audit_status:-0}" -ne 0 ]; then
+          echo "SAST ha encontrado hallazgos; se conservan los informes para el PoC."
+        fi
+      continue-on-error: true
+
     - name: Start OWASP Juice Shop (Target)
-      if: env.SCAN_MODE == 'baseline' || env.SCAN_MODE == 'active'
       run: |
         docker run -d -p 3000:3000 --name juice-shop-instance bkimminich/juice-shop
         echo "Esperando a que Juice Shop esté en línea..."
@@ -40,22 +55,32 @@ jobs:
         echo -e "\nJuice Shop está listo para el escaneo."
 
     - name: Run OWASP ZAP Baseline Scan (Passive)
-      if: env.SCAN_MODE == 'baseline'
+      if: env.EXPERIMENT_SCENARIO == 'baseline'
       run: |
         mkdir -p artifacts
         docker run --rm --network="host" --user root -v "$(pwd):/zap/wrk/:rw" \
-          zaproxy/zap-stable zap-baseline.py \
+          "$ZAP_IMAGE" zap-baseline.py \
           -t "$TARGET_URL" -J artifacts/zap-baseline.json -r artifacts/zap-baseline.html
       continue-on-error: true
 
-    - name: Run OWASP ZAP Active Scan (SQLi, XSS and CSRF)
-      if: env.SCAN_MODE == 'active'
+    - name: Run OWASP ZAP Stock Scan
+      if: env.EXPERIMENT_SCENARIO == 'stock'
       run: |
         mkdir -p artifacts
         docker run --rm --network="host" --user root -v "$(pwd):/zap/wrk/:rw" \
-          zaproxy/zap-stable zap-full-scan.py \
+          "$ZAP_IMAGE" zap-full-scan.py \
+          -t "$TARGET_URL" -J artifacts/zap-stock.json -r artifacts/zap-stock.html
+      continue-on-error: true
+
+    - name: Run OWASP ZAP Tuned Scan
+      if: env.EXPERIMENT_SCENARIO == 'tuned' || env.EXPERIMENT_SCENARIO == 'tuned-ai'
+      run: |
+        mkdir -p artifacts
+        docker run --rm --network="host" --user root -v "$(pwd):/zap/wrk/:rw" \
+          "$ZAP_IMAGE" zap-full-scan.py \
           -t "$TARGET_URL" -c /zap/wrk/zap/active-scan.conf \
-          -J artifacts/zap-active.json -r artifacts/zap-active.html
+          -J "artifacts/zap-${EXPERIMENT_SCENARIO}.json" \
+          -r "artifacts/zap-${EXPERIMENT_SCENARIO}.html"
       continue-on-error: true
 
     - name: Set up Python Environment
@@ -63,25 +88,41 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: Install Dependencies
-      # Forzamos la instalación directa sin validar condiciones previas
-      run: |
-        python -m pip install --upgrade pip
-        pip install openai
+    - name: Install AI triage dependency
+      if: env.EXPERIMENT_SCENARIO == 'tuned-ai' || env.EXPERIMENT_SCENARIO == 'baseline'
+      run: python -m pip install openai
 
     - name: Run AI Triage Script
+      if: env.EXPERIMENT_SCENARIO == 'tuned-ai' || env.EXPERIMENT_SCENARIO == 'baseline'
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       run: |
-        if [ "$SCAN_MODE" = "active" ]; then
-          python triage_vulner.py --report artifacts/zap-active.json --output artifacts/verified-active.html
-        else
+        if [ "$EXPERIMENT_SCENARIO" = "baseline" ]; then
           python triage_vulner.py --report artifacts/zap-baseline.json --output artifacts/verified-baseline.html
+        else
+          python triage_vulner.py --report "artifacts/zap-${EXPERIMENT_SCENARIO}.json" \
+            --output "artifacts/verified-${EXPERIMENT_SCENARIO}.html"
         fi
 
-    - name: Upload AI Verified Report
+    - name: Write experiment metadata
+      if: always()
+      run: |
+        mkdir -p artifacts
+        cat > artifacts/metadata.json <<EOF
+        {
+          "scenario": "${EXPERIMENT_SCENARIO}",
+          "target": "OWASP Juice Shop",
+          "target_url": "${TARGET_URL}",
+          "zap_image": "${ZAP_IMAGE}",
+          "commit": "${GITHUB_SHA}",
+          "ai_enabled": $([ "$EXPERIMENT_SCENARIO" = "tuned-ai" ] && echo true || echo false)
+        }
+        EOF
+
+    - name: Upload experiment artifacts
+      if: always()
       uses: actions/upload-artifact@v5
       with:
-        name: zap-and-ai-${{ env.SCAN_MODE }}-report
+        name: zap-experiment-${{ env.EXPERIMENT_SCENARIO }}
         path: artifacts/
         if-no-files-found: error
