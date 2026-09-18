@@ -1,21 +1,35 @@
-name: Automated Vulnerability & AI Triage Scan
+name: Automatizacion de Escaneo de Vulnerabilidad & Triaje con IA
 
 on:
   push:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
-  workflow_dispatch: 
+  workflow_dispatch:
+    inputs:
+      scan_mode:
+        description: "Tipo de análisis ZAP"
+        required: true
+        default: baseline
+        type: choice
+        options:
+          - baseline
+          - active
 
 jobs:
   security-assessment:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SCAN_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.scan_mode || 'baseline' }}
+      TARGET_URL: http://localhost:3000
 
     steps:
     - name: Checkout repository code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Start OWASP Juice Shop (Target)
+      if: env.SCAN_MODE == 'baseline' || env.SCAN_MODE == 'active'
       run: |
         docker run -d -p 3000:3000 --name juice-shop-instance bkimminich/juice-shop
         echo "Esperando a que Juice Shop esté en línea..."
@@ -25,14 +39,27 @@ jobs:
         done
         echo -e "\nJuice Shop está listo para el escaneo."
 
-    - name: Run OWASP ZAP Baseline Scan (Direct Docker Hub)
+    - name: Run OWASP ZAP Baseline Scan (Passive)
+      if: env.SCAN_MODE == 'baseline'
       run: |
-        # Usamos $(pwd) en lugar de la variable de GitHub para asegurar el mapeo físico en Linux
-        docker run --rm --network="host" --user root -v $(pwd):/zap/wrk/:rw zaproxy/zap-stable zap-baseline.py -t http://localhost:3000 -J report_json.json
+        mkdir -p artifacts
+        docker run --rm --network="host" --user root -v "$(pwd):/zap/wrk/:rw" \
+          zaproxy/zap-stable zap-baseline.py \
+          -t "$TARGET_URL" -J artifacts/zap-baseline.json -r artifacts/zap-baseline.html
+      continue-on-error: true
+
+    - name: Run OWASP ZAP Active Scan (SQLi, XSS and CSRF)
+      if: env.SCAN_MODE == 'active'
+      run: |
+        mkdir -p artifacts
+        docker run --rm --network="host" --user root -v "$(pwd):/zap/wrk/:rw" \
+          zaproxy/zap-stable zap-full-scan.py \
+          -t "$TARGET_URL" -c /zap/wrk/zap/active-scan.conf \
+          -J artifacts/zap-active.json -r artifacts/zap-active.html
       continue-on-error: true
 
     - name: Set up Python Environment
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.11'
 
@@ -45,11 +72,16 @@ jobs:
     - name: Run AI Triage Script
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      run: python triage_vulner.py --report report_json.json
+      run: |
+        if [ "$SCAN_MODE" = "active" ]; then
+          python triage_vulner.py --report artifacts/zap-active.json --output artifacts/verified-active.html
+        else
+          python triage_vulner.py --report artifacts/zap-baseline.json --output artifacts/verified-baseline.html
+        fi
 
     - name: Upload AI Verified Report
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
-        name: verified-vulnerabilities-report
-        path: verified_alerts.html
+        name: zap-and-ai-${{ env.SCAN_MODE }}-report
+        path: artifacts/
         if-no-files-found: error
