@@ -27,18 +27,20 @@ jobs:
 
     - name: Run OWASP ZAP Baseline Scan (Direct Docker Hub)
       run: |
-        docker run --rm --network="host" --user root -v ${{ github.workspace }}:/zap/wrk/:rw zaproxy/zap-stable zap-baseline.py -t http://localhost:3000 -J report_json.json -min
+        # Usamos $(pwd) en lugar de la variable de GitHub para asegurar el mapeo físico en Linux
+        docker run --rm --network="host" --user root -v $(pwd):/zap/wrk/:rw zaproxy/zap-stable zap-baseline.py -t http://localhost:3000 -J report_json.json
       continue-on-error: true
-    
+
     - name: Set up Python Environment
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-        cache: 'pip'
 
     - name: Install Dependencies
+      # Forzamos la instalación directa sin validar condiciones previas
       run: |
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install openai; fi
+        python -m pip install --upgrade pip
+        pip install openai
 
     - name: Run AI Triage Script
       env:
