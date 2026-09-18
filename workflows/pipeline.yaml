@@ -1,0 +1,51 @@
+name: Escaner de Vulnerabilidades Automatizado & Triage con IA
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: 
+
+jobs:
+  security-assessment:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository code
+      uses: actions/checkout@v4
+
+    - name: Start OWASP Juice Shop (Target)
+      run: |
+        docker run -d -p 3000:3000 --name juice-shop-instance bkimminich/juice-shop
+        echo "Esperando a que Juice Shop esté en línea..."
+        until $(curl --output /dev/null --silent --head --fail http://localhost:3000); do
+          printf '.'
+          sleep 5
+        done
+        echo "Juice Shop está listo para el escaneo."
+
+    - name: OWASP ZAP Baseline Scan
+      uses: zaproxy/action-baseline@v0.13.0
+      with:
+        target: 'http://localhost:3000'
+        allow_issue_writing: false
+        fail_action: false 
+        cmd_options: '-J zap_report.json'
+
+    - name: Set up Python Environment
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Dependencies
+      run: pip install openai
+
+    - name: Run AI Triage Script
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      run: python triage_vulnerabilities.py --report zap_report.json
+
+    - name: Upload Final Verified Report
+      uses: actions/upload-artifact@v4
+      with:
+        name: verified-vulnerabilities-report
+        path: verified_alerts.json
