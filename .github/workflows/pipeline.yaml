@@ -42,7 +42,7 @@ jobs:
     - name: Run AI Triage Script
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      run: python triage_vulnerabilities.py --report zap_report.json
+      run: python triage_vulnerabilities.py --report report_json.json
 
     - name: Upload Final Verified Report
       uses: actions/upload-artifact@v4
