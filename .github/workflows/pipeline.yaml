@@ -27,9 +27,9 @@ jobs:
 
     - name: Run OWASP ZAP Baseline Scan (Direct Docker Hub)
       run: |
-        docker run --rm --network="host" -v ${{ github.workspace }}:/zap/wrk/:rw zaproxy/zap-stable zap-baseline.py -t http://localhost:3000 -J report_json.json
-      continue-on-error: true 
-
+        docker run --rm --network="host" --user root -v ${{ github.workspace }}:/zap/wrk/:rw zaproxy/zap-stable zap-baseline.py -t http://localhost:3000 -J report_json.json -min
+      continue-on-error: true
+    
     - name: Set up Python Environment
       uses: actions/setup-python@v5
       with:
@@ -43,7 +43,7 @@ jobs:
     - name: Run AI Triage Script
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      run: python triage_vulnerabilities.py --report report_json.json
+      run: python triage_vulner.py --report report_json.json
 
     - name: Upload AI Verified Report
       uses: actions/upload-artifact@v4
