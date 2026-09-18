@@ -29,7 +29,7 @@ jobs:
         target: 'http://localhost:3000'
         allow_issue_writing: false
         fail_action: false 
-        cmd_options: '-J zap_report.json'
+        cmd_options: '-J /home/runner/work/tfmciber/tfmciber/zap_report.json'
 
     - name: Set up Python Environment
       uses: actions/setup-python@v5
@@ -42,7 +42,7 @@ jobs:
     - name: Run AI Triage Script
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      run: python triage_vulnerabilities.py --report report_json.json
+      run: python triage_vulnerabilities.py --report /home/runner/work/tfmciber/tfmciber/report_json.json
 
     - name: Upload Final Verified Report
       uses: actions/upload-artifact@v4
