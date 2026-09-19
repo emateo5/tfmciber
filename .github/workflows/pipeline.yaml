@@ -65,6 +65,7 @@ jobs:
         if target.username or target.password or target.fragment:
             raise SystemExit("TARGET_URL no puede contener credenciales ni fragmentos.")
         if target.hostname in {"localhost", "localhost.localdomain"}:
+          pass
         else:
             try:
                 addresses = {item[4][0] for item in socket.getaddrinfo(target.hostname, None)}
