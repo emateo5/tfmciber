@@ -17,6 +17,11 @@ on:
           - stock
           - tuned
           - tuned-ai
+      target_url:
+        description: "URL HTTP(S) autorizada para el escaneo"
+        required: true
+        default: http://localhost:3000
+        type: string
 
 jobs:
   security-assessment:
@@ -24,7 +29,7 @@ jobs:
     timeout-minutes: 30
     env:
       EXPERIMENT_SCENARIO: ${{ github.event_name == 'workflow_dispatch' && inputs.experiment_scenario || 'baseline' }}
-      TARGET_URL: http://localhost:3000
+      TARGET_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.target_url || 'http://localhost:3000' }}
       ZAP_IMAGE: zaproxy/zap-stable
 
     steps:
@@ -44,15 +49,53 @@ jobs:
         fi
       continue-on-error: true
 
+    - name: Validate target URL
+      env:
+        TARGET_URL: ${{ env.TARGET_URL }}
+      run: |
+        python - <<'PY'
+        import ipaddress
+        import os
+        import socket
+        from urllib.parse import urlparse
+
+        target = urlparse(os.environ["TARGET_URL"])
+        if target.scheme not in {"http", "https"} or not target.hostname:
+            raise SystemExit("TARGET_URL debe ser una URL HTTP(S) con host.")
+        if target.username or target.password or target.fragment:
+            raise SystemExit("TARGET_URL no puede contener credenciales ni fragmentos.")
+        if target.hostname in {"localhost", "localhost.localdomain"}:
+        else:
+            try:
+                addresses = {item[4][0] for item in socket.getaddrinfo(target.hostname, None)}
+            except socket.gaierror as error:
+                raise SystemExit(f"No se pudo resolver el host: {error}")
+            for address in addresses:
+                parsed_address = ipaddress.ip_address(address)
+                if (parsed_address.is_private or parsed_address.is_loopback
+                        or parsed_address.is_link_local or parsed_address.is_reserved):
+                    raise SystemExit("No se permiten hosts privados o internos.")
+        print(f"Objetivo validado: {target.scheme}://{target.hostname}")
+        PY
+
     - name: Start OWASP Juice Shop (Target)
+      if: env.TARGET_URL == 'http://localhost:3000'
       run: |
         docker run -d -p 3000:3000 --name juice-shop-instance bkimminich/juice-shop
-        echo "Esperando a que Juice Shop esté en línea..."
-        until $(curl --output /dev/null --silent --head --fail http://localhost:3000); do
+
+    - name: Wait for target
+      run: |
+        echo "Esperando a que el objetivo esté disponible..."
+        for attempt in {1..30}; do
+          if curl --output /dev/null --silent --show-error --fail --max-time 10 "$TARGET_URL"; then
+            echo "Objetivo disponible: $TARGET_URL"
+            exit 0
+          fi
           printf '.'
           sleep 5
         done
-        echo -e "\nJuice Shop está listo para el escaneo."
+        echo "El objetivo no respondió a tiempo: $TARGET_URL"
+        exit 1
 
     - name: Run OWASP ZAP Baseline Scan (Passive)
       if: env.EXPERIMENT_SCENARIO == 'baseline'

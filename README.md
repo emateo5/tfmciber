@@ -52,3 +52,25 @@ imagen de ZAP, el commit y la URL objetivo.
 La política activa depende de los identificadores de reglas instalados en la
 imagen de ZAP. Si se cambia la imagen o sus addons, hay que volver a validar
 los IDs de [`zap/active-scan.conf`](zap/active-scan.conf).
+
+## Usar otra URL
+
+El objetivo predeterminado es `http://localhost:3000`, donde el workflow inicia
+una instancia local de Juice Shop. Para analizar otra aplicación autorizada,
+ejecuta el workflow manualmente:
+
+1. Abre **Actions > Automatizacion de Escaneo de Vulnerabilidad & Triaje con IA > Run workflow**.
+2. Selecciona el escenario experimental.
+3. Introduce la URL en `target_url`, por ejemplo `https://staging.ejemplo.com`.
+4. Descarga el artefacto generado al finalizar.
+
+Cuando se usa una URL diferente no se inicia Juice Shop; el workflow espera que
+la aplicación ya esté disponible y ejecuta ZAP contra esa dirección. La URL
+debe ser HTTP o HTTPS, no puede contener credenciales ni fragmentos, y el
+workflow rechaza hosts privados o internos. Usa únicamente aplicaciones
+propias o aquellas para las que tengas autorización explícita. No se recomienda
+ejecutar escaneos activos contra producción.
+
+Los eventos automáticos `push` y `pull_request` siguen utilizando siempre
+Juice Shop local. La URL externa solo se puede seleccionar desde
+`workflow_dispatch`.
