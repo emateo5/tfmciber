@@ -122,7 +122,9 @@ jobs:
         mkdir -p artifacts
         docker run --rm --network="host" --user root -v "$(pwd):/zap/wrk/:rw" \
           "$ZAP_IMAGE" zap-full-scan.py \
-          -t "$TARGET_URL" -c /zap/wrk/zap/active-scan.conf \
+          -t "$TARGET_URL" -j --ajax-spider \
+          -c /zap/wrk/zap/active-scan.conf \
+          -z "-config log.file=/zap/wrk/artifacts/zap.log" \
           -J "artifacts/zap-${EXPERIMENT_SCENARIO}.json" \
           -r "artifacts/zap-${EXPERIMENT_SCENARIO}.html"
       continue-on-error: true
@@ -152,6 +154,10 @@ jobs:
       if: always()
       run: |
         mkdir -p artifacts
+        ajax_spider_enabled=false
+        if [ "$EXPERIMENT_SCENARIO" = "tuned" ] || [ "$EXPERIMENT_SCENARIO" = "tuned-ai" ]; then
+          ajax_spider_enabled=true
+        fi
         cat > artifacts/metadata.json <<EOF
         {
           "scenario": "${EXPERIMENT_SCENARIO}",
@@ -159,6 +165,7 @@ jobs:
           "target_url": "${TARGET_URL}",
           "zap_image": "${ZAP_IMAGE}",
           "commit": "${GITHUB_SHA}",
+          "ajax_spider_enabled": ${ajax_spider_enabled},
           "ai_enabled": $([ "$EXPERIMENT_SCENARIO" = "tuned-ai" ] && echo true || echo false)
         }
         EOF

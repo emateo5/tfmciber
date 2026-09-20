@@ -30,8 +30,8 @@ Para ejecutar un escenario experimental manualmente:
 | Escenario | Escaneo ZAP | Politica | Triaje IA |
 | --- | --- | --- | --- |
 | `stock` | Active Scan | Predeterminada de ZAP | No |
-| `tuned` | Active Scan | [`zap/active-scan.conf`](zap/active-scan.conf) | No |
-| `tuned-ai` | Active Scan | [`zap/active-scan.conf`](zap/active-scan.conf) | Si |
+| `tuned` | Spider tradicional + AJAX Spider + Active Scan | [`zap/active-scan.conf`](zap/active-scan.conf) | No |
+| `tuned-ai` | Spider tradicional + AJAX Spider + Active Scan | [`zap/active-scan.conf`](zap/active-scan.conf) | Si |
 | `baseline` | Baseline pasivo | Predeterminada de ZAP | Si |
 
 La comparación principal del TFM es `stock` frente a `tuned` frente a
@@ -43,6 +43,13 @@ La política afinada incluye SQL Injection, XSS reflejado/DOM y comprobaciones
 relacionadas con tokens CSRF. La comprobación CSRF estándar de ZAP detecta
 principalmente la ausencia de protección anti-CSRF; no sustituye una prueba
 completa de explotación CSRF autenticada.
+
+Los escenarios `tuned` y `tuned-ai` activan el AJAX Spider (`-j
+--ajax-spider`) para mejorar el descubrimiento de rutas y peticiones generadas
+por JavaScript antes del Active Scan. Esto no garantiza la cobertura completa
+de estados autenticados, flujos de negocio ni endpoints que no sean accesibles
+mediante la navegación automática. El `zap.log` se conserva como artefacto
+para diagnosticar errores o ejecuciones incompletas.
 
 Los artefactos se publican con el escenario en el nombre, junto con
 `metadata.json`, los resultados SAST y los informes JSON/HTML de ZAP. Para
