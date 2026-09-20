@@ -123,11 +123,11 @@ jobs:
         mkdir -p artifacts
         docker run --rm --user root "$ZAP_IMAGE" zap-full-scan.py -h \
           | tee artifacts/zap-full-scan-help.txt
-        grep -Eq -- '(^|[[:space:]])-j([,[:space:]]|$)|--ajax-spider' \
+        grep -Eq -- '(^|[[:space:]])-j([,[:space:]]|$)|--client-spider' \
           artifacts/zap-full-scan-help.txt
         docker run --rm --network="host" --user root -v "$(pwd):/zap/wrk/:rw" \
           "$ZAP_IMAGE" zap-full-scan.py \
-          -t "$TARGET_URL" -j --ajax-spider \
+          -t "$TARGET_URL" -j --client-spider \
           -c /zap/wrk/zap/active-scan.conf \
           -J "artifacts/zap-${EXPERIMENT_SCENARIO}.json" \
           -r "artifacts/zap-${EXPERIMENT_SCENARIO}.html" \
@@ -161,8 +161,9 @@ jobs:
       run: |
         mkdir -p artifacts
         ajax_spider_enabled=false
+        client_spider_enabled=false
         if [ "$EXPERIMENT_SCENARIO" = "tuned" ] || [ "$EXPERIMENT_SCENARIO" = "tuned-ai" ]; then
-          ajax_spider_enabled=true
+          client_spider_enabled=true
         fi
         cat > artifacts/metadata.json <<EOF
         {
@@ -172,6 +173,7 @@ jobs:
           "zap_image": "${ZAP_IMAGE}",
           "commit": "${GITHUB_SHA}",
           "ajax_spider_enabled": ${ajax_spider_enabled},
+          "client_spider_enabled": ${client_spider_enabled},
           "ai_enabled": $([ "$EXPERIMENT_SCENARIO" = "tuned-ai" ] && echo true || echo false)
         }
         EOF
