@@ -119,14 +119,20 @@ jobs:
     - name: Run OWASP ZAP Tuned Scan
       if: env.EXPERIMENT_SCENARIO == 'tuned' || env.EXPERIMENT_SCENARIO == 'tuned-ai'
       run: |
+        set -o pipefail
         mkdir -p artifacts
+        docker run --rm --user root "$ZAP_IMAGE" zap-full-scan.py -h \
+          | tee artifacts/zap-full-scan-help.txt
+        grep -Eq -- '(^|[[:space:]])-j([,[:space:]]|$)|--ajax-spider' \
+          artifacts/zap-full-scan-help.txt
         docker run --rm --network="host" --user root -v "$(pwd):/zap/wrk/:rw" \
           "$ZAP_IMAGE" zap-full-scan.py \
           -t "$TARGET_URL" -j --ajax-spider \
           -c /zap/wrk/zap/active-scan.conf \
-          -z "-config log.file=/zap/wrk/artifacts/zap.log" \
           -J "artifacts/zap-${EXPERIMENT_SCENARIO}.json" \
-          -r "artifacts/zap-${EXPERIMENT_SCENARIO}.html"
+          -r "artifacts/zap-${EXPERIMENT_SCENARIO}.html" \
+          2>&1 | tee "artifacts/zap.log"
+        test -s "artifacts/zap.log"
       continue-on-error: true
 
     - name: Set up Python Environment
