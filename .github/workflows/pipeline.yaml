@@ -166,11 +166,30 @@ jobs:
           --data-urlencode "apikey=tfm-zap-key" \
           --data-urlencode "ids=40018,40012,40026,40014" \
           "http://127.0.0.1:8090/JSON/ascan/action/enableScanners/"
+        target_regex=$(python - <<'PY'
+        import os
+        import re
+        from urllib.parse import urlparse
+
+        target = urlparse(os.environ["TARGET_URL"])
+        origin = f"{target.scheme}://{target.netloc}"
+        print(f"^{re.escape(origin)}(?:/.*)?$")
+        PY
+        )
+        curl --silent --show-error --fail --get \
+          --data-urlencode "apikey=tfm-zap-key" \
+          --data-urlencode "contextName=target-context" \
+          "http://127.0.0.1:8090/JSON/context/action/newContext/"
+        curl --silent --show-error --fail --get \
+          --data-urlencode "apikey=tfm-zap-key" \
+          --data-urlencode "contextName=target-context" \
+          --data-urlencode "regex=${target_regex}" \
+          "http://127.0.0.1:8090/JSON/context/action/includeInContext/"
         curl --silent --show-error --fail --get \
           --data-urlencode "apikey=tfm-zap-key" \
           --data-urlencode "url=${TARGET_URL}" \
           --data-urlencode "recurse=true" \
-          --data-urlencode "inScopeOnly=false" \
+          --data-urlencode "inScopeOnly=true" \
           "http://127.0.0.1:8090/JSON/ascan/action/scan/"
         while true; do
           status=$(curl --silent --show-error --fail \

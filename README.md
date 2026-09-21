@@ -50,7 +50,9 @@ antes del Active Scan. Esto mejora la cobertura de APIs de una SPA, aunque no
 garantiza la cobertura completa
 de estados autenticados, flujos de negocio ni endpoints que no sean accesibles
 mediante la navegación automática. El `zap.log` se conserva como artefacto
-para diagnosticar errores o ejecuciones incompletas.
+para diagnosticar errores o ejecuciones incompletas. El Active Scan se limita
+al origen de `target_url`; los recursos externos pueden aparecer como tráfico
+del navegador, pero no se escanean activamente.
 
 Los artefactos se publican con el escenario en el nombre, junto con
 `metadata.json`, los resultados SAST y los informes JSON/HTML de ZAP. Para
