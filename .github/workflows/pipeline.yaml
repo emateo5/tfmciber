@@ -31,6 +31,7 @@ jobs:
       EXPERIMENT_SCENARIO: ${{ github.event_name == 'workflow_dispatch' && inputs.experiment_scenario || 'baseline' }}
       TARGET_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.target_url || 'http://localhost:3000' }}
       ZAP_IMAGE: zaproxy/zap-stable
+      ZAP_TUNED_IMAGE: tfmciber/zap-firefox:2.17.0
 
     steps:
     - name: Checkout repository code
@@ -122,6 +123,10 @@ jobs:
       with:
         node-version: '22'
 
+    - name: Build ZAP image with Firefox
+      if: env.EXPERIMENT_SCENARIO == 'tuned' || env.EXPERIMENT_SCENARIO == 'tuned-ai'
+      run: docker build --tag "$ZAP_TUNED_IMAGE" zap
+
     - name: Install browser discovery dependency
       if: env.EXPERIMENT_SCENARIO == 'tuned' || env.EXPERIMENT_SCENARIO == 'tuned-ai'
       run: |
@@ -135,7 +140,7 @@ jobs:
         mkdir -p artifacts
         docker run -d --name zap --network="host" --user root \
           -v "$(pwd):/zap/wrk/:rw" \
-          "$ZAP_IMAGE" zap.sh -daemon -host 0.0.0.0 -port 8090 \
+          "$ZAP_TUNED_IMAGE" zap.sh -daemon -host 0.0.0.0 -port 8090 \
           -config api.key=tfm-zap-key \
           -config log.file=/zap/wrk/artifacts/zap-internal.log
         for attempt in {1..60}; do
@@ -257,6 +262,7 @@ jobs:
           "target": "OWASP Juice Shop",
           "target_url": "${TARGET_URL}",
           "zap_image": "${ZAP_IMAGE}",
+          "zap_tuned_image": "${ZAP_TUNED_IMAGE}",
           "commit": "${GITHUB_SHA}",
           "ajax_spider_enabled": ${ajax_spider_enabled},
           "client_spider_enabled": ${client_spider_enabled},

@@ -44,7 +44,8 @@ relacionadas con tokens CSRF. La comprobación CSRF estándar de ZAP detecta
 principalmente la ausencia de protección anti-CSRF; no sustituye una prueba
 completa de explotación CSRF autenticada.
 
-Los escenarios `tuned` y `tuned-ai` usan un navegador Playwright a través del
+Los escenarios `tuned` y `tuned-ai` usan una imagen ZAP derivada con
+`firefox-esr`, además de un navegador Playwright a través del
 proxy de ZAP para descubrir rutas y peticiones XHR generadas por JavaScript
 antes del Active Scan. Esto mejora la cobertura de APIs de una SPA, aunque no
 garantiza la cobertura completa
