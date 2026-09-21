@@ -125,7 +125,9 @@ jobs:
 
     - name: Build ZAP image with Firefox
       if: env.EXPERIMENT_SCENARIO == 'tuned' || env.EXPERIMENT_SCENARIO == 'tuned-ai'
-      run: docker build --tag "$ZAP_TUNED_IMAGE" zap
+      run: |
+        set -o pipefail
+        docker build --tag "$ZAP_TUNED_IMAGE" zap 2>&1 | tee artifacts/zap-image-build.log
 
     - name: Install browser discovery dependency
       if: env.EXPERIMENT_SCENARIO == 'tuned' || env.EXPERIMENT_SCENARIO == 'tuned-ai'
@@ -138,11 +140,12 @@ jobs:
       run: |
         set -euo pipefail
         mkdir -p artifacts
-        docker run -d --name zap --network="host" --user root \
+        container_id=$(docker run -d --name zap --network="host" --user root \
           -v "$(pwd):/zap/wrk/:rw" \
           "$ZAP_TUNED_IMAGE" zap.sh -daemon -host 0.0.0.0 -port 8090 \
           -config api.key=tfm-zap-key \
-          -config log.file=/zap/wrk/artifacts/zap-internal.log
+          -config log.file=/zap/wrk/artifacts/zap-internal.log)
+        echo "Contenedor ZAP: ${container_id}"
         for attempt in {1..60}; do
           if curl --silent --fail \
             "http://127.0.0.1:8090/JSON/core/view/version/?apikey=tfm-zap-key"; then
@@ -152,6 +155,7 @@ jobs:
           sleep 2
         done
         docker logs zap || true
+        docker inspect zap > artifacts/zap-container-inspect.json || true
         exit 1
 
     - name: Discover SPA requests through ZAP
@@ -217,7 +221,14 @@ jobs:
       if: always() && (env.EXPERIMENT_SCENARIO == 'tuned' || env.EXPERIMENT_SCENARIO == 'tuned-ai')
       run: |
         {
-          docker logs zap 2>&1 || true
+          if docker container inspect zap >/dev/null 2>&1; then
+            docker logs zap 2>&1 || true
+            docker inspect zap > artifacts/zap-container-inspect.json || true
+          else
+            echo "El contenedor ZAP no llegó a crearse o ya no existe."
+          fi
+          docker image inspect "$ZAP_TUNED_IMAGE" > artifacts/zap-image-inspect.json 2>&1 || true
+          docker ps -a > artifacts/docker-containers.txt 2>&1 || true
           if [ -f artifacts/zap-internal.log ]; then
             cat artifacts/zap-internal.log
           fi
