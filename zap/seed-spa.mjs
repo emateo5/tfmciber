@@ -18,6 +18,15 @@ const browser = await chromium.launch({
 const context = await browser.newContext({ ignoreHTTPSErrors: true });
 const page = await context.newPage();
 
+await page.route("**/*", async route => {
+  const requestUrl = new URL(route.request().url());
+  if (requestUrl.origin !== targetUrl.origin) {
+    await route.abort("blockedbyclient");
+    return;
+  }
+  await route.continue();
+});
+
 page.on("request", request => {
   const method = request.method();
   if (method !== "GET" || /\/rest\/|\/api\//i.test(request.url())) {
