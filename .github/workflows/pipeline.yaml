@@ -116,24 +116,90 @@ jobs:
           -t "$TARGET_URL" -J artifacts/zap-stock.json -r artifacts/zap-stock.html
       continue-on-error: true
 
+    - name: Set up Node.js for browser discovery
+      if: env.EXPERIMENT_SCENARIO == 'tuned' || env.EXPERIMENT_SCENARIO == 'tuned-ai'
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Install browser discovery dependency
+      if: env.EXPERIMENT_SCENARIO == 'tuned' || env.EXPERIMENT_SCENARIO == 'tuned-ai'
+      run: |
+        npm install --no-save playwright
+        npx playwright install --with-deps chromium
+
+    - name: Start ZAP for browser discovery
+      if: env.EXPERIMENT_SCENARIO == 'tuned' || env.EXPERIMENT_SCENARIO == 'tuned-ai'
+      run: |
+        set -euo pipefail
+        mkdir -p artifacts
+        docker run -d --name zap --network="host" --user root \
+          -v "$(pwd):/zap/wrk/:rw" \
+          "$ZAP_IMAGE" zap.sh -daemon -host 0.0.0.0 -port 8090 \
+          -config api.key=tfm-zap-key \
+          -config log.file=/zap/wrk/artifacts/zap-internal.log
+        for attempt in {1..60}; do
+          if curl --silent --fail \
+            "http://127.0.0.1:8090/JSON/core/view/version/?apikey=tfm-zap-key"; then
+            echo
+            exit 0
+          fi
+          sleep 2
+        done
+        docker logs zap || true
+        exit 1
+
+    - name: Discover SPA requests through ZAP
+      if: env.EXPERIMENT_SCENARIO == 'tuned' || env.EXPERIMENT_SCENARIO == 'tuned-ai'
+      env:
+        ZAP_PROXY: http://127.0.0.1:8090
+      run: node zap/seed-spa.mjs "$TARGET_URL"
+
     - name: Run OWASP ZAP Tuned Scan
       if: env.EXPERIMENT_SCENARIO == 'tuned' || env.EXPERIMENT_SCENARIO == 'tuned-ai'
       run: |
-        set -o pipefail
+        set -euo pipefail
         mkdir -p artifacts
-        docker run --rm --user root "$ZAP_IMAGE" zap-full-scan.py -h \
-          | tee artifacts/zap-full-scan-help.txt
-        grep -Eq -- '(^|[[:space:]])-j([,[:space:]]|$)|--client-spider' \
-          artifacts/zap-full-scan-help.txt
-        docker run --rm --network="host" --user root -v "$(pwd):/zap/wrk/:rw" \
-          "$ZAP_IMAGE" zap-full-scan.py \
-          -t "$TARGET_URL" -j --client-spider \
-          -c /zap/wrk/zap/active-scan.conf \
-          -J "artifacts/zap-${EXPERIMENT_SCENARIO}.json" \
-          -r "artifacts/zap-${EXPERIMENT_SCENARIO}.html" \
-          2>&1 | tee "artifacts/zap.log"
-        test -s "artifacts/zap.log"
+        curl --silent --show-error --fail \
+          "http://127.0.0.1:8090/JSON/ascan/action/disableAllScanners/?apikey=tfm-zap-key"
+        curl --silent --show-error --fail --get \
+          --data-urlencode "apikey=tfm-zap-key" \
+          --data-urlencode "ids=40018,40012,40026,40014" \
+          "http://127.0.0.1:8090/JSON/ascan/action/enableScanners/"
+        curl --silent --show-error --fail --get \
+          --data-urlencode "apikey=tfm-zap-key" \
+          --data-urlencode "url=${TARGET_URL}" \
+          --data-urlencode "recurse=true" \
+          --data-urlencode "inScopeOnly=false" \
+          "http://127.0.0.1:8090/JSON/ascan/action/scan/"
+        while true; do
+          status=$(curl --silent --show-error --fail \
+            "http://127.0.0.1:8090/JSON/ascan/view/status/?apikey=tfm-zap-key" |
+            python -c 'import json, sys; print(json.load(sys.stdin)["status"])')
+          echo "Estado Active Scan: ${status}%"
+          [ "${status}" = "100" ] && break
+          sleep 5
+        done
+        curl --silent --show-error --fail \
+          "http://127.0.0.1:8090/OTHER/core/other/jsonreport/?apikey=tfm-zap-key" \
+          > "artifacts/zap-${EXPERIMENT_SCENARIO}.json"
+        curl --silent --show-error --fail \
+          "http://127.0.0.1:8090/OTHER/core/other/htmlreport/?apikey=tfm-zap-key" \
+          > "artifacts/zap-${EXPERIMENT_SCENARIO}.html"
+        test -s "artifacts/zap-${EXPERIMENT_SCENARIO}.json"
       continue-on-error: true
+
+    - name: Save ZAP logs
+      if: always() && (env.EXPERIMENT_SCENARIO == 'tuned' || env.EXPERIMENT_SCENARIO == 'tuned-ai')
+      run: |
+        {
+          docker logs zap 2>&1 || true
+          if [ -f artifacts/zap-internal.log ]; then
+            cat artifacts/zap-internal.log
+          fi
+        } > artifacts/zap.log
+        test -s artifacts/zap.log || printf 'ZAP did not produce a log.\n' > artifacts/zap.log
+        docker rm -f zap >/dev/null 2>&1 || true
 
     - name: Set up Python Environment
       uses: actions/setup-python@v6
@@ -162,8 +228,9 @@ jobs:
         mkdir -p artifacts
         ajax_spider_enabled=false
         client_spider_enabled=false
+        browser_seed_enabled=false
         if [ "$EXPERIMENT_SCENARIO" = "tuned" ] || [ "$EXPERIMENT_SCENARIO" = "tuned-ai" ]; then
-          client_spider_enabled=true
+          browser_seed_enabled=true
         fi
         cat > artifacts/metadata.json <<EOF
         {
@@ -174,6 +241,7 @@ jobs:
           "commit": "${GITHUB_SHA}",
           "ajax_spider_enabled": ${ajax_spider_enabled},
           "client_spider_enabled": ${client_spider_enabled},
+          "browser_seed_enabled": ${browser_seed_enabled},
           "ai_enabled": $([ "$EXPERIMENT_SCENARIO" = "tuned-ai" ] && echo true || echo false)
         }
         EOF
