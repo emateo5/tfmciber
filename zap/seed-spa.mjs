@@ -43,11 +43,21 @@ page.on("request", request => {
 
 async function clickFirstMatchingText(pattern) {
   const candidate = page.getByText(pattern).first();
-  if (await candidate.count() === 0) {
+  if (await candidate.count() === 0 || !(await candidate.isVisible())) {
     return false;
   }
   await candidate.click({ timeout: 10000 });
   return true;
+}
+
+async function firstAvailable(selectors) {
+  for (const selector of selectors) {
+    const candidate = page.locator(selector).first();
+    if (await candidate.count() > 0 && await candidate.isVisible()) {
+      return candidate;
+    }
+  }
+  return null;
 }
 
 async function runAuthenticatedWorkflow() {
@@ -56,13 +66,36 @@ async function runAuthenticatedWorkflow() {
     return;
   }
 
-  await page.goto(new URL("/#/login", targetUrl).href, {
+  const loginUrl = new URL(targetUrl.href);
+  loginUrl.hash = "/login";
+  await page.goto(loginUrl.href, {
     waitUntil: "networkidle",
     timeout: 30000,
   });
-  await page.locator('input[name="email"]').fill(testUsername);
-  await page.locator('input[name="password"]').fill(testPassword);
-  await page.locator('button[type="submit"]').click();
+  const email = await firstAvailable([
+    'input[name="email"]',
+    'input#email',
+    'input[type="email"]',
+  ]);
+  const password = await firstAvailable([
+    'input[name="password"]',
+    'input#password',
+    'input[type="password"]',
+  ]);
+  if (!email || !password) {
+    throw new Error(`login_fields_not_found url=${page.url()}`);
+  }
+  await email.fill(testUsername);
+  await password.fill(testPassword);
+  const submit = await firstAvailable([
+    'button#loginButton',
+    'button[type="submit"]',
+    'input[type="submit"]',
+  ]);
+  if (!submit) {
+    throw new Error(`login_submit_not_found url=${page.url()}`);
+  }
+  await submit.click({ timeout: 10000 });
   await page.waitForTimeout(1500);
   workflow.authentication = !page.url().includes("/login");
   console.log(`WORKFLOW authentication=${workflow.authentication}`);
@@ -81,8 +114,8 @@ async function runReflectedXssWorkflow() {
     dialogDetected = dialog.message() === marker;
     await dialog.dismiss();
   });
-  const xssUrl = new URL("/#/search", targetUrl);
-  xssUrl.searchParams.set("q", payload);
+  const xssUrl = new URL(targetUrl.href);
+  xssUrl.hash = `/search?q=${encodeURIComponent(payload)}`;
   await page.goto(xssUrl.href, { waitUntil: "networkidle", timeout: 30000 });
   await page.waitForTimeout(1000);
   workflow.reflectedXss = dialogDetected;
