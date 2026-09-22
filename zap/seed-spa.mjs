@@ -60,6 +60,26 @@ async function firstAvailable(selectors) {
   return null;
 }
 
+async function dismissOverlays() {
+  const dismissSelectors = [
+    'button[aria-label*="Dismiss" i]',
+    'button:has-text("Dismiss")',
+    'button:has-text("Me want it")',
+    '.cdk-overlay-backdrop',
+  ];
+  for (const selector of dismissSelectors) {
+    const candidates = page.locator(selector);
+    const count = await candidates.count();
+    for (let index = 0; index < count; index += 1) {
+      const candidate = candidates.nth(index);
+      if (await candidate.isVisible().catch(() => false)) {
+        await candidate.click({ force: true }).catch(() => undefined);
+      }
+    }
+  }
+  await page.waitForTimeout(300);
+}
+
 async function runAuthenticatedWorkflow() {
   if (!testUsername || !testPassword) {
     console.log("WORKFLOW authentication=skipped reason=missing_secrets");
@@ -72,6 +92,7 @@ async function runAuthenticatedWorkflow() {
     waitUntil: "networkidle",
     timeout: 30000,
   });
+  await dismissOverlays();
   const email = await firstAvailable([
     'input[name="email"]',
     'input#email',
@@ -110,7 +131,7 @@ async function runAuthenticatedWorkflow() {
     await submit.elementHandle(),
     { timeout: 10000 }
   );
-  await submit.click({ timeout: 10000 });
+  await submit.click({ timeout: 10000, force: true });
   await page.waitForTimeout(1500);
   workflow.authentication = !page.url().includes("/login");
   console.log(`WORKFLOW authentication=${workflow.authentication}`);
