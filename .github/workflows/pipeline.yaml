@@ -162,6 +162,8 @@ jobs:
       if: env.EXPERIMENT_SCENARIO == 'tuned' || env.EXPERIMENT_SCENARIO == 'tuned-ai'
       env:
         ZAP_PROXY: http://127.0.0.1:8090
+        TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
+        TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
       run: node zap/seed-spa.mjs "$TARGET_URL"
 
     - name: Run OWASP ZAP Tuned Scan
@@ -264,8 +266,15 @@ jobs:
         ajax_spider_enabled=false
         client_spider_enabled=false
         browser_seed_enabled=false
+        authenticated_workflow_enabled=false
+        cart_workflow_enabled=false
+        csrf_validation_enabled=false
+        reflected_xss_workflow_enabled=false
         if [ "$EXPERIMENT_SCENARIO" = "tuned" ] || [ "$EXPERIMENT_SCENARIO" = "tuned-ai" ]; then
           browser_seed_enabled=true
+          authenticated_workflow_enabled=true
+          cart_workflow_enabled=true
+          reflected_xss_workflow_enabled=true
         fi
         cat > artifacts/metadata.json <<EOF
         {
@@ -278,6 +287,10 @@ jobs:
           "ajax_spider_enabled": ${ajax_spider_enabled},
           "client_spider_enabled": ${client_spider_enabled},
           "browser_seed_enabled": ${browser_seed_enabled},
+          "authenticated_workflow_enabled": ${authenticated_workflow_enabled},
+          "cart_workflow_enabled": ${cart_workflow_enabled},
+          "csrf_validation_enabled": ${csrf_validation_enabled},
+          "reflected_xss_workflow_enabled": ${reflected_xss_workflow_enabled},
           "ai_enabled": $([ "$EXPERIMENT_SCENARIO" = "tuned-ai" ] && echo true || echo false)
         }
         EOF

@@ -55,6 +55,13 @@ para diagnosticar errores o ejecuciones incompletas. El Active Scan se limita
 al origen de `target_url`; los recursos externos pueden aparecer como tráfico
 del navegador, pero no se escanean activamente.
 
+En los escenarios afinados, Playwright usa los secretos `TEST_USERNAME` y
+`TEST_PASSWORD` para ejecutar un login de prueba, intenta añadir un producto al
+carrito y ejecuta una prueba controlada de XSS reflejado. La modificación del
+carrito demuestra cobertura de una acción autenticada, pero no constituye por
+si sola una explotación CSRF; la validación CSRF funcional requiere una prueba
+adicional con origen/token controlados.
+
 Los artefactos se publican con el escenario en el nombre, junto con
 `metadata.json`, los resultados SAST y los informes JSON/HTML de ZAP. Para
 comparar ejecuciones deben mantenerse constantes la versión de Juice Shop, la
