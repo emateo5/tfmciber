@@ -87,6 +87,15 @@ async function runAuthenticatedWorkflow() {
   }
   await email.fill(testUsername);
   await password.fill(testPassword);
+  const loginButtons = await page.locator("button").evaluateAll(buttons =>
+    buttons.map(button => ({
+      id: button.id,
+      type: button.getAttribute("type"),
+      text: button.textContent?.trim(),
+      disabled: button.disabled,
+    }))
+  );
+  console.log(`LOGIN url=${page.url()} buttons=${JSON.stringify(loginButtons)}`);
   const submit = await firstAvailable([
     'button#loginButton',
     'button[type="submit"]',
@@ -95,6 +104,12 @@ async function runAuthenticatedWorkflow() {
   if (!submit) {
     throw new Error(`login_submit_not_found url=${page.url()}`);
   }
+  await submit.waitFor({ state: "visible", timeout: 10000 });
+  await page.waitForFunction(
+    element => !element.disabled,
+    await submit.elementHandle(),
+    { timeout: 10000 }
+  );
   await submit.click({ timeout: 10000 });
   await page.waitForTimeout(1500);
   workflow.authentication = !page.url().includes("/login");
