@@ -59,8 +59,11 @@ En los escenarios afinados, Playwright usa los secretos `TEST_USERNAME` y
 `TEST_PASSWORD` para ejecutar un login de prueba, intenta añadir un producto al
 carrito y ejecuta una prueba controlada de XSS reflejado. La modificación del
 carrito demuestra cobertura de una acción autenticada, pero no constituye por
-si sola una explotación CSRF; la validación CSRF funcional requiere una prueba
-adicional con origen/token controlados.
+si sola una explotación CSRF. El workflow repite la petición de carrito desde
+un contexto separado sin credenciales y guarda el resultado en
+`artifacts/browser-workflow.json`: `csrfValidation=true` significa que la
+petición no autenticada fue rechazada; `false` requiere investigar si la
+prueba fue omitida o si la acción fue aceptada sin protección.
 
 Los artefactos se publican con el escenario en el nombre, junto con
 `metadata.json`, los resultados SAST y los informes JSON/HTML de ZAP. Para

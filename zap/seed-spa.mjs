@@ -1,4 +1,5 @@
 import { chromium } from "playwright";
+import { writeFile } from "node:fs/promises";
 
 const target = process.argv[2];
 if (!target) {
@@ -15,8 +16,10 @@ const pending = [targetUrl.href];
 const workflow = {
   authentication: false,
   cart: false,
+  csrfValidation: false,
   reflectedXss: false,
 };
+let cartRequest;
 
 const browser = await chromium.launch({
   headless: true,
@@ -36,6 +39,12 @@ await page.route("**/*", async route => {
 
 page.on("request", request => {
   const method = request.method();
+  if (method === "POST" && /\/api\/BasketItems\/?$/i.test(request.url())) {
+    cartRequest = {
+      url: request.url(),
+      postData: request.postData(),
+    };
+  }
   if (method !== "GET" || /\/rest\/|\/api\//i.test(request.url())) {
     console.log(`BROWSER ${method} ${request.url()}`);
   }
@@ -142,6 +151,37 @@ async function runAuthenticatedWorkflow() {
   console.log(`WORKFLOW cart=${workflow.cart}`);
 }
 
+async function runCsrfWorkflow() {
+  if (!cartRequest) {
+    console.log("WORKFLOW csrf_validation=skipped reason=cart_request_not_captured");
+    return;
+  }
+
+  const attackerContext = await browser.newContext({ ignoreHTTPSErrors: true });
+  const attackerPage = await attackerContext.newPage();
+  await attackerPage.route("**/*", async route => {
+    const requestUrl = new URL(route.request().url());
+    if (requestUrl.origin !== targetUrl.origin) {
+      await route.abort("blockedbyclient");
+      return;
+    }
+    await route.continue();
+  });
+  await attackerPage.goto("data:text/html,<title>csrf-test</title>");
+  const result = await attackerPage.evaluate(async ({ url, postData }) => {
+    const response = await fetch(url, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: postData || "{}",
+    });
+    return { status: response.status };
+  }, cartRequest);
+  await attackerContext.close();
+  workflow.csrfValidation = result.status >= 400;
+  console.log(`WORKFLOW csrf_validation=${workflow.csrfValidation} status=${result.status}`);
+}
+
 async function runReflectedXssWorkflow() {
   const marker = "tfm-xss-reflected";
   const payload = `<img src=x onerror=alert('${marker}')>`;
@@ -195,10 +235,18 @@ while (pending.length > 0 && visited.size < maxPages) {
 await runAuthenticatedWorkflow().catch(error =>
   console.log(`WORKFLOW authentication_error=${error.message}`)
 );
+await runCsrfWorkflow().catch(error =>
+  console.log(`WORKFLOW csrf_validation_error=${error.message}`)
+);
 await runReflectedXssWorkflow().catch(error =>
   console.log(`WORKFLOW reflected_xss_error=${error.message}`)
 );
 
 console.log(`BROWSER_SUMMARY visited=${visited.size} pending=${pending.length}`);
 console.log(`WORKFLOW_SUMMARY ${JSON.stringify(workflow)}`);
+await writeFile(
+  process.env.BROWSER_WORKFLOW_REPORT || "artifacts/browser-workflow.json",
+  `${JSON.stringify(workflow, null, 2)}\n`,
+  "utf8"
+);
 await browser.close();

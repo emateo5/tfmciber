@@ -164,6 +164,7 @@ jobs:
         ZAP_PROXY: http://127.0.0.1:8090
         TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
         TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
+        BROWSER_WORKFLOW_REPORT: artifacts/browser-workflow.json
       run: node zap/seed-spa.mjs "$TARGET_URL"
 
     - name: Run OWASP ZAP Tuned Scan
@@ -275,6 +276,9 @@ jobs:
           authenticated_workflow_enabled=true
           cart_workflow_enabled=true
           reflected_xss_workflow_enabled=true
+        fi
+        if [ -f artifacts/browser-workflow.json ]; then
+          csrf_validation_enabled=$(python -c 'import json; print(str(json.load(open("artifacts/browser-workflow.json"))["csrfValidation"]).lower())')
         fi
         cat > artifacts/metadata.json <<EOF
         {
