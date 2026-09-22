@@ -39,10 +39,12 @@ await page.route("**/*", async route => {
 
 page.on("request", request => {
   const method = request.method();
-  if (method === "POST" && /\/api\/BasketItems\/?$/i.test(request.url())) {
+  if (["POST", "PUT", "PATCH"].includes(method) && /\/api\/BasketItems(?:\/\d+)?\/?$/i.test(request.url())) {
     cartRequest = {
       url: request.url(),
+      method,
       postData: request.postData(),
+      contentType: request.headers()["content-type"] || "application/json",
     };
   }
   if (method !== "GET" || /\/rest\/|\/api\//i.test(request.url())) {
@@ -168,11 +170,11 @@ async function runCsrfWorkflow() {
     await route.continue();
   });
   await attackerPage.goto("data:text/html,<title>csrf-test</title>");
-  const result = await attackerPage.evaluate(async ({ url, postData }) => {
+  const result = await attackerPage.evaluate(async ({ url, method, postData, contentType }) => {
     const response = await fetch(url, {
-      method: "POST",
+      method,
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": contentType },
       body: postData || "{}",
     });
     return { status: response.status };
