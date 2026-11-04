@@ -1,10 +1,28 @@
 # tfmciber
 
+## Requisitos
+
+- Python 3.11 o posterior.
+- Las dependencias de Python de [`requirements.txt`](requirements.txt).
+- Una clave `OPENAI_API_KEY` si se ejecuta el triaje con IA.
+- Docker y una cuenta de GitHub con permisos para ejecutar Actions si se
+  ejecuta el pipeline completo.
+
+Instala la dependencia de Python con:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
 ## Uso
 
 El script analiza un reporte JSON de OWASP ZAP y genera un reporte HTML autocontenido:
 
 ```bash
+# Linux/macOS:
+export OPENAI_API_KEY=tu_clave
+# PowerShell:
+# $env:OPENAI_API_KEY = "tu_clave"
 python triage_vulner.py --report zap_report.json
 ```
 
@@ -14,12 +32,21 @@ El resultado se guarda en `verified_alerts.html`. Para indicar otra ruta:
 python triage_vulner.py --report zap_report.json --output resultados/triage.html
 ```
 
+El script no ejecuta ZAP ni realiza el escaneo: recibe un informe JSON ya
+generado y envía cada alerta a `gpt-4o-mini` para obtener una valoración de
+posible falso positivo. Si no se proporciona `OPENAI_API_KEY`, la ejecución no
+puede completar el triaje.
+
 ## PoC experimental
 
 El workflow de GitHub Actions ejecuta SAST y DAST sobre una instancia limpia de
 OWASP Juice Shop. SAST usa Bandit y `pip-audit`; DAST usa OWASP ZAP. Los
 eventos `push` y `pull_request` ejecutan el escenario `baseline` como control
 operativo.
+
+El escenario `baseline` también intenta ejecutar el triaje con IA, por lo que
+requiere configurar el secreto `OPENAI_API_KEY` en el repositorio. Los
+escenarios `stock` y `tuned` no llaman a OpenAI; `tuned-ai` sí lo hace.
 
 Para ejecutar un escenario experimental manualmente:
 
@@ -33,6 +60,13 @@ Para ejecutar un escenario experimental manualmente:
 | `tuned` | Navegador Playwright + Active Scan | [`zap/active-scan.conf`](zap/active-scan.conf) | No |
 | `tuned-ai` | Navegador Playwright + Active Scan | [`zap/active-scan.conf`](zap/active-scan.conf) | Si |
 | `baseline` | Baseline pasivo | Predeterminada de ZAP | Si |
+
+Los cuatro escenarios publican un artefacto `zap-experiment-<escenario>` con
+`metadata.json`, los informes SAST y los resultados de ZAP disponibles. Los
+escenarios `baseline`, `tuned` y `tuned-ai` guardan además
+`browser-workflow.json` cuando corresponde y un informe HTML de triaje
+`verified-<escenario>.html` cuando se ejecuta la etapa de IA. `stock` solo
+genera los informes bruto JSON/HTML del escaneo y los resultados SAST.
 
 La comparación principal del TFM es `stock` frente a `tuned` frente a
 `tuned-ai`. `tuned` y `tuned-ai` ejecutan exactamente la misma política; la
@@ -95,3 +129,10 @@ ejecutar escaneos activos contra producción.
 Los eventos automáticos `push` y `pull_request` siguen utilizando siempre
 Juice Shop local. La URL externa solo se puede seleccionar desde
 `workflow_dispatch`.
+
+Para los escenarios `tuned` y `tuned-ai`, configura también los secretos
+`TEST_USERNAME` y `TEST_PASSWORD` si quieres habilitar el flujo autenticado de
+Playwright. Si faltan, el descubrimiento continúa, pero el login y las
+comprobaciones que dependen del carrito se omiten. El navegador limita la
+navegación al mismo origen de `target_url` y procesa como máximo 150 páginas
+(`SPA_MAX_PAGES` permite cambiar ese límite).
