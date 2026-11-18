@@ -29,6 +29,7 @@ const workflow = {
   csrfUsernameBefore: null,
   csrfUsernameAfter: null,
   csrfOrigin: "http://htmledit.squarefree.com",
+  authenticationError: null,
   reflectedXss: false,
 };
 let cartRequest;
@@ -161,8 +162,92 @@ async function dismissOverlays() {
 
 async function runAuthenticatedWorkflow() {
   if (!testUsername || !testPassword) {
+    workflow.authenticationError = "missing_secrets";
     console.log("WORKFLOW authentication=skipped reason=missing_secrets");
     return;
+  }
+
+  try {
+    const loginResponse = await context.request.post(
+      new URL("/rest/user/login", targetUrl.origin).href,
+      {
+        data: {
+          email: testUsername,
+          password: testPassword,
+        },
+        headers: { "Content-Type": "application/json" },
+        timeout: 30000,
+      }
+    );
+    const loginStatus = loginResponse.status();
+    const loginBody = await loginResponse.json().catch(() => null);
+    loginToken = loginBody?.authentication?.token || null;
+    basketIdFromLogin = loginBody?.authentication?.bid
+      ? String(loginBody.authentication.bid)
+      : null;
+
+    if (loginStatus !== 200 || !loginToken) {
+      throw new Error(
+        `login_rejected status=${loginStatus} body=${JSON.stringify(loginBody)}`
+      );
+    }
+
+    await context.addCookies([{
+      name: "token",
+      value: loginToken,
+      url: targetUrl.origin,
+      httpOnly: false,
+      secure: targetUrl.protocol === "https:",
+      sameSite: "Lax",
+      path: "/",
+    }]);
+
+    await page.goto(new URL("/", targetUrl.origin).href, {
+      waitUntil: "domcontentloaded",
+      timeout: 30000,
+    });
+    await page.evaluate(token => {
+      localStorage.setItem("token", token);
+      localStorage.setItem("bid", String(window.location.href));
+    }, loginToken).catch(() => undefined);
+
+    const profileResponse = await page.goto(
+      new URL("/profile", targetUrl.origin).href,
+      { waitUntil: "networkidle", timeout: 30000 }
+    );
+    const profileAvailable = await firstAvailable([
+      'input[name="username"]',
+      'input#username',
+    ]);
+    workflow.authentication =
+      profileResponse?.status() !== 401 &&
+      Boolean(profileAvailable);
+
+    if (!workflow.authentication) {
+      throw new Error(
+        `profile_session_invalid status=${profileResponse?.status() || 0}`
+      );
+    }
+
+    console.log(
+      `WORKFLOW authentication=true login_status=${loginStatus} ` +
+      `profile_status=${profileResponse?.status()}`
+    );
+    await page.goto(targetUrl.href, {
+      waitUntil: "networkidle",
+      timeout: 30000,
+    });
+    await page.waitForTimeout(1000);
+    workflow.cart = await clickFirstMatchingText(
+      /add to basket|add to cart/i
+    );
+    console.log(`WORKFLOW cart=${workflow.cart}`);
+    return;
+  } catch (error) {
+    workflow.authentication = false;
+    workflow.authenticationError = error.message;
+    workflow.csrfError = error.message;
+    console.log(`WORKFLOW authentication=false error=${error.message}`);
   }
 
   const loginUrl = new URL(targetUrl.href);
@@ -315,6 +400,7 @@ async function runCsrfWorkflow() {
       victimCookies.map(cookie => ({
         ...cookie,
         sameSite: "None",
+        secure: targetUrl.protocol === "https:",
       }))
     );
 

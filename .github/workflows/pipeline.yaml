@@ -291,6 +291,7 @@ jobs:
         csrf_username_before=null
         csrf_username_after=null
         csrf_origin=""
+        authentication_error=null
         reflected_xss_workflow_enabled=false
         if [ "$EXPERIMENT_SCENARIO" = "tuned" ] || [ "$EXPERIMENT_SCENARIO" = "tuned-ai" ]; then
           browser_seed_enabled=true
@@ -312,6 +313,7 @@ jobs:
           csrf_username_before=$(python -c 'import json; print(json.dumps(json.load(open("artifacts/browser-workflow.json")).get("csrfUsernameBefore")))')
           csrf_username_after=$(python -c 'import json; print(json.dumps(json.load(open("artifacts/browser-workflow.json")).get("csrfUsernameAfter")))')
           csrf_origin=$(python -c 'import json; print(json.load(open("artifacts/browser-workflow.json")).get("csrfOrigin", ""))')
+          authentication_error=$(python -c 'import json; print(json.dumps(json.load(open("artifacts/browser-workflow.json")).get("authenticationError")))')
         fi
         cat > artifacts/metadata.json <<EOF
         {
@@ -339,6 +341,7 @@ jobs:
           "csrf_username_before": ${csrf_username_before},
           "csrf_username_after": ${csrf_username_after},
           "csrf_origin": "${csrf_origin}",
+          "authentication_error": ${authentication_error},
           "reflected_xss_workflow_enabled": ${reflected_xss_workflow_enabled},
           "ai_enabled": $([ "$EXPERIMENT_SCENARIO" = "tuned-ai" ] && echo true || echo false)
         }
