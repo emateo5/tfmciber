@@ -73,10 +73,10 @@ La comparación principal del TFM es `stock` frente a `tuned` frente a
 única diferencia es el postprocesamiento con IA. La IA ayuda a priorizar y
 revisar falsos positivos, pero no sustituye el resultado bruto de ZAP.
 
-La política afinada incluye SQL Injection, XSS reflejado/DOM y comprobaciones
-relacionadas con tokens CSRF. La comprobación CSRF estándar de ZAP detecta
-principalmente la ausencia de protección anti-CSRF; no sustituye una prueba
-completa de explotación CSRF autenticada.
+La política afinada incluye SQL Injection, XSS reflejado, persistente y DOM.
+La detección de tokens CSRF es pasiva y no forma parte de la política de
+Active Scan; tampoco sustituye una prueba completa de explotación CSRF
+autenticada.
 
 Los escenarios `tuned` y `tuned-ai` usan una imagen ZAP derivada con
 `firefox-esr`, además de un navegador Playwright a través del

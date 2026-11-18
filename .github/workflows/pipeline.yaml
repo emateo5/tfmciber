@@ -172,12 +172,21 @@ jobs:
       run: |
         set -euo pipefail
         mkdir -p artifacts
+        scanner_ids=$(awk '!/^[[:space:]]*#/ && NF { print $1 }' zap/active-scan.conf | paste -sd, -)
+        if [ -z "$scanner_ids" ]; then
+          echo "No se encontraron IDs de Active Scan en zap/active-scan.conf."
+          exit 1
+        fi
+        echo "Scanners activos configurados: ${scanner_ids}"
         curl --silent --show-error --fail \
           "http://127.0.0.1:8090/JSON/ascan/action/disableAllScanners/?apikey=tfm-zap-key"
         curl --silent --show-error --fail --get \
           --data-urlencode "apikey=tfm-zap-key" \
-          --data-urlencode "ids=40018,40012,40026,40014" \
+          --data-urlencode "ids=${scanner_ids}" \
           "http://127.0.0.1:8090/JSON/ascan/action/enableScanners/"
+        curl --silent --show-error --fail \
+          "http://127.0.0.1:8090/JSON/ascan/view/scanners/?apikey=tfm-zap-key" \
+          > artifacts/active-scanners.json
         target_regex=$(python - <<'PY'
         import os
         import re
