@@ -87,6 +87,9 @@ respuesta exitosa con contenido y si la petición se considera vulnerable.
 El resultado distingue `protected`, `potentially-vulnerable`,
 `indeterminate`, `failed` y `skipped`; los estados `failed` e
 `indeterminate` no se interpretan como confirmación de protección.
+Una vulnerabilidad confirmada requiere que el replay tenga origen externo,
+no reutilice credenciales y produzca un aumento verificable del contenido
+del carrito. En ese caso `csrfProven=true` y `csrfOutcome=vulnerable`.
 
 Los escenarios `tuned` y `tuned-ai` usan una imagen ZAP derivada con
 `firefox-esr`, además de un navegador Playwright a través del

