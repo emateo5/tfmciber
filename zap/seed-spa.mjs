@@ -530,16 +530,27 @@ async function runReflectedXssWorkflow() {
   xssUrl.searchParams.set("q", payload);
 
   let dialogDetected = false;
-  page.once("dialog", async dialog => {
+  const dialogHandler = async dialog => {
+    if (dialog.type() !== "alert") {
+      await dialog.dismiss().catch(() => undefined);
+      return;
+    }
     dialogDetected = true;
-    await dialog.dismiss();
-  });
+    await dialog.dismiss().catch(() => undefined);
+  };
 
-  await page.goto(xssUrl.href, { waitUntil: "networkidle", timeout: 30000 });
-  await page.waitForTimeout(1000);
-  const reflectedPayloadPresent = await page.locator("iframe").count() > 0 ||
-    (await page.content()).includes(payload);
-  workflow.reflectedXss = dialogDetected || reflectedPayloadPresent;
+  page.on("dialog", dialogHandler);
+  try {
+    await page.goto(xssUrl.href, { waitUntil: "networkidle", timeout: 30000 });
+    await page.waitForTimeout(1500);
+  } finally {
+    page.off("dialog", dialogHandler);
+  }
+
+  const payloadFrames = await page.locator(
+    'iframe[src^="javascript:"]'
+  ).count();
+  workflow.reflectedXss = dialogDetected || payloadFrames > 0;
   console.log(`WORKFLOW reflected_xss=${workflow.reflectedXss}`);
 }
 
@@ -549,16 +560,27 @@ async function runDomXssWorkflow() {
   xssUrl.hash = `/search?q=${encodeURIComponent(payload)}`;
 
   let dialogDetected = false;
-  page.once("dialog", async dialog => {
+  const dialogHandler = async dialog => {
+    if (dialog.type() !== "alert") {
+      await dialog.dismiss().catch(() => undefined);
+      return;
+    }
     dialogDetected = true;
-    await dialog.dismiss();
-  });
+    await dialog.dismiss().catch(() => undefined);
+  };
 
-  await page.goto(xssUrl.href, { waitUntil: "networkidle", timeout: 30000 });
-  await page.waitForTimeout(1500);
-  const domPayloadPresent = await page.locator("iframe").count() > 0 ||
-    (await page.content()).includes("javascript:alert");
-  workflow.domXss = dialogDetected || domPayloadPresent;
+  page.on("dialog", dialogHandler);
+  try {
+    await page.goto(xssUrl.href, { waitUntil: "networkidle", timeout: 30000 });
+    await page.waitForTimeout(1500);
+  } finally {
+    page.off("dialog", dialogHandler);
+  }
+
+  const payloadFrames = await page.locator(
+    'iframe[src^="javascript:"]'
+  ).count();
+  workflow.domXss = dialogDetected || payloadFrames > 0;
   console.log(`WORKFLOW dom_xss=${workflow.domXss}`);
 }
 
