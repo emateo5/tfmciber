@@ -29,6 +29,8 @@ const workflow = {
   reflectedXss: false,
 };
 let cartRequest;
+let loginToken = null;
+let basketIdFromLogin = null;
 
 const browser = await chromium.launch({
   headless: true,
@@ -48,7 +50,10 @@ await page.route("**/*", async route => {
 
 page.on("request", request => {
   const method = request.method();
-  if (["POST", "PUT", "PATCH"].includes(method) && /\/api\/BasketItems(?:\/\d+)?\/?$/i.test(request.url())) {
+  if (
+    ["POST", "PUT", "PATCH"].includes(method) &&
+    /\/api\/BasketItems(?:\/\d+)?\/?/i.test(request.url())
+  ) {
     const headers = request.headers();
     try {
       const postData = request.postData();
@@ -70,6 +75,13 @@ page.on("request", request => {
         cartRequest.postData &&
         cartRequest.payload?.BasketId
       );
+      if (workflow.csrfRequestCaptured) {
+        console.log(
+          `CSRF_CAPTURE basket=${cartRequest.payload.BasketId} ` +
+          `product=${cartRequest.payload.ProductId} ` +
+          `method=${cartRequest.method}`
+        );
+      }
     } catch (error) {
       workflow.csrfRequestCaptured = false;
       workflow.csrfError = `cart_request_capture_failed=${error.message}`;
@@ -77,6 +89,31 @@ page.on("request", request => {
   }
   if (method !== "GET" || /\/rest\/|\/api\//i.test(request.url())) {
     console.log(`BROWSER ${method} ${request.url()}`);
+  }
+});
+
+page.on("response", async response => {
+  if (!/\/rest\/user\/login\/?$/.test(new URL(response.url()).pathname)) {
+    return;
+  }
+  try {
+    if (!response.ok()) {
+      return;
+    }
+    const body = await response.json();
+    loginToken = body?.authentication?.token || null;
+    if (!loginToken) {
+      return;
+    }
+    const encodedPayload = loginToken.split(".")[1];
+    if (encodedPayload) {
+      const claims = JSON.parse(
+        Buffer.from(encodedPayload, "base64").toString("utf8")
+      );
+      basketIdFromLogin = claims.bid ? String(claims.bid) : null;
+    }
+  } catch (error) {
+    console.log(`LOGIN_RESPONSE_ERROR ${error.message}`);
   }
 });
 
@@ -179,6 +216,53 @@ async function runAuthenticatedWorkflow() {
   await page.waitForTimeout(1000);
   workflow.cart = await clickFirstMatchingText(/add to basket|add to cart/i);
   console.log(`WORKFLOW cart=${workflow.cart}`);
+  await page.waitForTimeout(1500);
+
+  if (!cartRequest && basketIdFromLogin) {
+    const storageToken = await page.evaluate(() =>
+      localStorage.getItem("token")
+    ).catch(() => null);
+    const authorization = loginToken
+      ? `Bearer ${loginToken}`
+      : (storageToken ? `Bearer ${storageToken}` : null);
+
+    if (authorization) {
+      const productsResponse = await page.evaluate(async ({ origin, authorization }) => {
+        const response = await fetch(`${origin}/api/Products?limit=1`, {
+          headers: { Authorization: authorization },
+        });
+        if (!response.ok) {
+          return null;
+        }
+        const body = await response.json();
+        return Array.isArray(body?.data) ? body.data[0] : null;
+      }, { origin: targetUrl.origin, authorization }).catch(() => null);
+
+      if (productsResponse?.id) {
+        cartRequest = {
+          url: `${targetUrl.origin}/api/BasketItems/`,
+          method: "POST",
+          postData: JSON.stringify({
+            ProductId: productsResponse.id,
+            BasketId: basketIdFromLogin,
+            quantity: 1,
+          }),
+          payload: {
+            ProductId: productsResponse.id,
+            BasketId: basketIdFromLogin,
+            quantity: 1,
+          },
+          contentType: "application/json",
+          authorization,
+          csrfTokenPresent: false,
+        };
+        workflow.csrfRequestCaptured = true;
+        console.log(
+          `CSRF_CAPTURE fallback basket=${basketIdFromLogin} product=${productsResponse.id}`
+        );
+      }
+    }
+  }
 }
 
 async function runCsrfWorkflow() {
@@ -217,11 +301,6 @@ async function runCsrfWorkflow() {
   });
 
   try {
-    const victimCookies = await context.cookies(targetUrl.origin);
-    if (victimCookies.length > 0) {
-      await attackerContext.addCookies(victimCookies);
-    }
-
     let response;
     let body;
     const requestOptions = {
