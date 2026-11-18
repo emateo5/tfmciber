@@ -17,6 +17,11 @@ const workflow = {
   authentication: false,
   cart: false,
   csrfValidation: false,
+  csrfVulnerable: false,
+  csrfRequestCaptured: false,
+  csrfStatus: null,
+  csrfEffectObserved: false,
+  csrfTokenPresent: false,
   reflectedXss: false,
 };
 let cartRequest;
@@ -40,12 +45,17 @@ await page.route("**/*", async route => {
 page.on("request", request => {
   const method = request.method();
   if (["POST", "PUT", "PATCH"].includes(method) && /\/api\/BasketItems(?:\/\d+)?\/?$/i.test(request.url())) {
+    const headers = request.headers();
     cartRequest = {
       url: request.url(),
       method,
       postData: request.postData(),
-      contentType: request.headers()["content-type"] || "application/json",
+      contentType: headers["content-type"] || "application/json",
+      csrfTokenPresent: Object.keys(headers).some(name =>
+        /^(csrf|x-csrf|x-xsrf|anti-csrf)/i.test(name)
+      ),
     };
+    workflow.csrfRequestCaptured = true;
   }
   if (method !== "GET" || /\/rest\/|\/api\//i.test(request.url())) {
     console.log(`BROWSER ${method} ${request.url()}`);
@@ -171,17 +181,50 @@ async function runCsrfWorkflow() {
   });
   await attackerPage.goto("data:text/html,<title>csrf-test</title>");
   const result = await attackerPage.evaluate(async ({ url, method, postData, contentType }) => {
-    const response = await fetch(url, {
-      method,
-      credentials: "include",
-      headers: { "Content-Type": contentType },
-      body: postData || "{}",
-    });
-    return { status: response.status };
+    try {
+      const response = await fetch(url, {
+        method,
+        credentials: "omit",
+        headers: { "Content-Type": contentType },
+        body: postData || "{}",
+      });
+      const body = await response.text();
+      return {
+        status: response.status,
+        ok: response.ok,
+        bodyLength: body.length,
+      };
+    } catch (error) {
+      return {
+        status: 0,
+        ok: false,
+        error: error.message,
+      };
+    }
   }, cartRequest);
   await attackerContext.close();
-  workflow.csrfValidation = result.status >= 400;
-  console.log(`WORKFLOW csrf_validation=${workflow.csrfValidation} status=${result.status}`);
+
+  workflow.csrfTokenPresent = cartRequest.csrfTokenPresent;
+  workflow.csrfStatus = result.status;
+
+  const rejected = result.status === 401 ||
+    result.status === 403 ||
+    result.status === 419 ||
+    result.status === 400;
+  workflow.csrfEffectObserved = result.status >= 200 &&
+    result.status < 300 &&
+    result.bodyLength > 0;
+  workflow.csrfVulnerable = result.status >= 200 &&
+    result.status < 400 &&
+    workflow.csrfEffectObserved &&
+    !workflow.csrfTokenPresent;
+  workflow.csrfValidation = rejected || workflow.csrfEffectObserved === false;
+
+  console.log(
+    `WORKFLOW csrf_validation=${workflow.csrfValidation} ` +
+    `vulnerable=${workflow.csrfVulnerable} status=${result.status} ` +
+    `effect=${workflow.csrfEffectObserved} csrf_token=${workflow.csrfTokenPresent}`
+  );
 }
 
 async function runReflectedXssWorkflow() {
