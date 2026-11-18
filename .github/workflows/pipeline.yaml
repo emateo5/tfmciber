@@ -279,6 +279,11 @@ jobs:
         authenticated_workflow_enabled=false
         cart_workflow_enabled=false
         csrf_validation_enabled=false
+        csrf_request_captured=false
+        csrf_status=null
+        csrf_effect_observed=false
+        csrf_vulnerable=false
+        csrf_token_present=false
         reflected_xss_workflow_enabled=false
         if [ "$EXPERIMENT_SCENARIO" = "tuned" ] || [ "$EXPERIMENT_SCENARIO" = "tuned-ai" ]; then
           browser_seed_enabled=true
@@ -288,6 +293,11 @@ jobs:
         fi
         if [ -f artifacts/browser-workflow.json ]; then
           csrf_validation_enabled=$(python -c 'import json; print(str(json.load(open("artifacts/browser-workflow.json"))["csrfValidation"]).lower())')
+          csrf_request_captured=$(python -c 'import json; print(str(json.load(open("artifacts/browser-workflow.json")).get("csrfRequestCaptured", False)).lower())')
+          csrf_status=$(python -c 'import json; print(json.dumps(json.load(open("artifacts/browser-workflow.json")).get("csrfStatus")))')
+          csrf_effect_observed=$(python -c 'import json; print(str(json.load(open("artifacts/browser-workflow.json")).get("csrfEffectObserved", False)).lower())')
+          csrf_vulnerable=$(python -c 'import json; print(str(json.load(open("artifacts/browser-workflow.json")).get("csrfVulnerable", False)).lower())')
+          csrf_token_present=$(python -c 'import json; print(str(json.load(open("artifacts/browser-workflow.json")).get("csrfTokenPresent", False)).lower())')
         fi
         cat > artifacts/metadata.json <<EOF
         {
@@ -303,6 +313,11 @@ jobs:
           "authenticated_workflow_enabled": ${authenticated_workflow_enabled},
           "cart_workflow_enabled": ${cart_workflow_enabled},
           "csrf_validation_enabled": ${csrf_validation_enabled},
+          "csrf_request_captured": ${csrf_request_captured},
+          "csrf_status": ${csrf_status},
+          "csrf_effect_observed": ${csrf_effect_observed},
+          "csrf_vulnerable": ${csrf_vulnerable},
+          "csrf_token_present": ${csrf_token_present},
           "reflected_xss_workflow_enabled": ${reflected_xss_workflow_enabled},
           "ai_enabled": $([ "$EXPERIMENT_SCENARIO" = "tuned-ai" ] && echo true || echo false)
         }

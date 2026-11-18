@@ -78,6 +78,13 @@ La detección de tokens CSRF es pasiva y no forma parte de la política de
 Active Scan; tampoco sustituye una prueba completa de explotación CSRF
 autenticada.
 
+Los escenarios afinados ejecutan una comprobación dinámica de CSRF mediante
+Playwright. Capturan una petición modificadora del flujo de carrito y la
+repiten desde un contexto independiente sin credenciales ni cookies.
+`artifacts/browser-workflow.json` registra si se capturó la petición,
+el estado HTTP recibido, la presencia de un token CSRF, si se obtuvo una
+respuesta exitosa con contenido y si la petición se considera vulnerable.
+
 Los escenarios `tuned` y `tuned-ai` usan una imagen ZAP derivada con
 `firefox-esr`, además de un navegador Playwright a través del
 proxy de ZAP para descubrir rutas y peticiones XHR generadas por JavaScript
