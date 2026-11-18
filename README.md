@@ -84,6 +84,9 @@ repiten desde un contexto independiente sin credenciales ni cookies.
 `artifacts/browser-workflow.json` registra si se capturó la petición,
 el estado HTTP recibido, la presencia de un token CSRF, si se obtuvo una
 respuesta exitosa con contenido y si la petición se considera vulnerable.
+El resultado distingue `protected`, `potentially-vulnerable`,
+`indeterminate`, `failed` y `skipped`; los estados `failed` e
+`indeterminate` no se interpretan como confirmación de protección.
 
 Los escenarios `tuned` y `tuned-ai` usan una imagen ZAP derivada con
 `firefox-esr`, además de un navegador Playwright a través del

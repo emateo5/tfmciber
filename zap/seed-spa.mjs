@@ -22,6 +22,8 @@ const workflow = {
   csrfStatus: null,
   csrfEffectObserved: false,
   csrfTokenPresent: false,
+  csrfOutcome: "skipped",
+  csrfError: null,
   reflectedXss: false,
 };
 let cartRequest;
@@ -165,65 +167,98 @@ async function runAuthenticatedWorkflow() {
 
 async function runCsrfWorkflow() {
   if (!cartRequest) {
+    workflow.csrfOutcome = "skipped";
+    workflow.csrfError = "cart_request_not_captured";
     console.log("WORKFLOW csrf_validation=skipped reason=cart_request_not_captured");
     return;
   }
 
-  const attackerContext = await browser.newContext({ ignoreHTTPSErrors: true });
-  const attackerPage = await attackerContext.newPage();
-  await attackerPage.route("**/*", async route => {
-    const requestUrl = new URL(route.request().url());
-    if (requestUrl.origin !== targetUrl.origin) {
-      await route.abort("blockedbyclient");
-      return;
-    }
-    await route.continue();
+  const attackerContext = await browser.newContext({
+    ignoreHTTPSErrors: true,
   });
-  await attackerPage.goto("data:text/html,<title>csrf-test</title>");
-  const result = await attackerPage.evaluate(async ({ url, method, postData, contentType }) => {
-    try {
-      const response = await fetch(url, {
-        method,
-        credentials: "omit",
-        headers: { "Content-Type": contentType },
-        body: postData || "{}",
-      });
-      const body = await response.text();
-      return {
-        status: response.status,
-        ok: response.ok,
-        bodyLength: body.length,
-      };
-    } catch (error) {
-      return {
-        status: 0,
-        ok: false,
-        error: error.message,
-      };
+
+  try {
+    let response;
+    let body;
+    const requestOptions = {
+      headers: { "Content-Type": cartRequest.contentType },
+      timeout: 30000,
+    };
+
+    if (cartRequest.postData) {
+      if (/^application\/json/i.test(cartRequest.contentType)) {
+        try {
+          requestOptions.data = JSON.parse(cartRequest.postData);
+        } catch {
+          requestOptions.data = cartRequest.postData;
+        }
+      } else {
+        requestOptions.data = cartRequest.postData;
+      }
     }
-  }, cartRequest);
-  await attackerContext.close();
 
-  workflow.csrfTokenPresent = cartRequest.csrfTokenPresent;
-  workflow.csrfStatus = result.status;
+    switch (cartRequest.method) {
+      case "POST":
+        response = await attackerContext.request.post(cartRequest.url, requestOptions);
+        break;
+      case "PUT":
+        response = await attackerContext.request.put(cartRequest.url, requestOptions);
+        break;
+      case "PATCH":
+        response = await attackerContext.request.patch(cartRequest.url, requestOptions);
+        break;
+      default:
+        throw new Error(`unsupported_request_method=${cartRequest.method}`);
+    }
 
-  const rejected = result.status === 401 ||
-    result.status === 403 ||
-    result.status === 419 ||
-    result.status === 400;
-  workflow.csrfEffectObserved = result.status >= 200 &&
-    result.status < 300 &&
-    result.bodyLength > 0;
-  workflow.csrfVulnerable = result.status >= 200 &&
-    result.status < 400 &&
-    workflow.csrfEffectObserved &&
-    !workflow.csrfTokenPresent;
-  workflow.csrfValidation = rejected || workflow.csrfEffectObserved === false;
+    body = await response.text();
+    const status = response.status();
+    workflow.csrfTokenPresent = cartRequest.csrfTokenPresent;
+    workflow.csrfStatus = status;
+    workflow.csrfEffectObserved =
+      status >= 200 && status < 300 && body.length > 0;
+
+    const rejected = status === 401 || status === 403 || status === 419;
+    const inconclusive = status === 0 || status === 400 || status === 405 || status === 409;
+
+    if (rejected) {
+      workflow.csrfOutcome = "protected";
+      workflow.csrfVulnerable = false;
+      workflow.csrfValidation = true;
+    } else if (inconclusive) {
+      workflow.csrfOutcome = "indeterminate";
+      workflow.csrfVulnerable = false;
+      workflow.csrfValidation = false;
+    } else if (
+      status >= 200 && status < 400 &&
+      workflow.csrfEffectObserved &&
+      !workflow.csrfTokenPresent
+    ) {
+      workflow.csrfOutcome = "potentially-vulnerable";
+      workflow.csrfVulnerable = true;
+      workflow.csrfValidation = true;
+    } else {
+      workflow.csrfOutcome = "indeterminate";
+      workflow.csrfVulnerable = false;
+      workflow.csrfValidation = false;
+    }
+  } catch (error) {
+    workflow.csrfStatus = 0;
+    workflow.csrfEffectObserved = false;
+    workflow.csrfVulnerable = false;
+    workflow.csrfValidation = false;
+    workflow.csrfOutcome = "failed";
+    workflow.csrfError = error.message;
+  } finally {
+    await attackerContext.close();
+  }
 
   console.log(
     `WORKFLOW csrf_validation=${workflow.csrfValidation} ` +
-    `vulnerable=${workflow.csrfVulnerable} status=${result.status} ` +
-    `effect=${workflow.csrfEffectObserved} csrf_token=${workflow.csrfTokenPresent}`
+    `outcome=${workflow.csrfOutcome} vulnerable=${workflow.csrfVulnerable} ` +
+    `status=${workflow.csrfStatus} effect=${workflow.csrfEffectObserved} ` +
+    `csrf_token=${workflow.csrfTokenPresent}` +
+    (workflow.csrfError ? ` error=${workflow.csrfError}` : "")
   );
 }
 
