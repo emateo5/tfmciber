@@ -228,6 +228,8 @@ async function runAuthenticatedWorkflow() {
         `profile_session_invalid status=${profileResponse?.status() || 0}`
       );
     }
+    workflow.authenticationError = null;
+    workflow.csrfError = null;
 
     console.log(
       `WORKFLOW authentication=true login_status=${loginStatus} ` +
@@ -298,6 +300,10 @@ async function runAuthenticatedWorkflow() {
   await submit.click({ timeout: 10000, force: true });
   await page.waitForTimeout(1500);
   workflow.authentication = !page.url().includes("/login");
+  if (workflow.authentication) {
+    workflow.authenticationError = null;
+    workflow.csrfError = null;
+  }
   console.log(`WORKFLOW authentication=${workflow.authentication}`);
 
   await page.goto(targetUrl.href, { waitUntil: "networkidle", timeout: 30000 });
@@ -396,13 +402,18 @@ async function runCsrfWorkflow() {
 
   try {
     const victimCookies = await context.cookies(targetUrl.origin);
-    await attackerContext.addCookies(
-      victimCookies.map(cookie => ({
-        ...cookie,
-        sameSite: "None",
+    const portableCookies = victimCookies
+      .filter(cookie => cookie.name && cookie.value !== undefined)
+      .map(cookie => ({
+        name: cookie.name,
+        value: cookie.value,
+        url: targetUrl.origin,
+        httpOnly: cookie.httpOnly,
         secure: targetUrl.protocol === "https:",
-      }))
-    );
+      }));
+    if (portableCookies.length > 0) {
+      await attackerContext.addCookies(portableCookies);
+    }
 
     const attackerPage = await attackerContext.newPage();
     await attackerPage.route(`${attackerOrigin}/csrf-test`, route =>
@@ -422,18 +433,16 @@ async function runCsrfWorkflow() {
     );
 
     let status = 0;
-    const navigation = attackerPage.waitForNavigation({
+    attackerPage.on("response", response => {
+      if (new URL(response.url()).pathname === "/profile") {
+        status = response.status();
+      }
+    });
+    await attackerPage.goto(`${attackerOrigin}/csrf-test`, {
       waitUntil: "networkidle",
       timeout: 30000,
-    }).catch(() => null);
-    await attackerPage.goto(`${attackerOrigin}/csrf-test`, {
-      waitUntil: "domcontentloaded",
-      timeout: 30000,
     });
-    const victimResponse = await navigation;
-    if (victimResponse) {
-      status = victimResponse.status();
-    }
+    await attackerPage.waitForTimeout(1500);
 
     await attackerContext.close();
     await page.goto(new URL("/profile", targetUrl.origin).href, {
@@ -450,6 +459,9 @@ async function runCsrfWorkflow() {
 
     workflow.csrfStatus = status;
     workflow.csrfUsernameAfter = usernameAfter;
+    if (workflow.csrfEffectObserved) {
+      workflow.csrfError = null;
+    }
     workflow.csrfEffectObserved =
       usernameAfter !== null && usernameAfter !== usernameBefore;
 
