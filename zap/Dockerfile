@@ -2,6 +2,7 @@ FROM zaproxy/zap-stable
 
 USER root
 ARG GECKODRIVER_VERSION=0.36.0
+ENV MOZ_DISABLE_CONTENT_SANDBOX=1
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl firefox-esr; \

@@ -91,6 +91,12 @@ desde el perfil autenticado después del envío externo. En ese caso
 `csrfProven=true` y `csrfOutcome=vulnerable`. Los estados `failed`,
 `indeterminate` y `skipped` no se interpretan como confirmación de protección.
 
+Además de ZAP, los escenarios afinados ejecutan comprobaciones dinámicas de
+XSS en Juice Shop: el payload oficial se usa en búsqueda para XSS reflejado,
+en la ruta hash de búsqueda para DOM XSS y en una reseña persistente mediante
+la API REST. Los resultados se publican como `reflectedXss`, `domXss` y
+`persistentXss` en `browser-workflow.json`.
+
 Los escenarios `tuned` y `tuned-ai` usan una imagen ZAP derivada con
 `firefox-esr`, además de un navegador Playwright a través del
 proxy de ZAP para descubrir rutas y peticiones XHR generadas por JavaScript

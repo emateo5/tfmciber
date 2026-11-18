@@ -140,7 +140,7 @@ jobs:
       run: |
         set -euo pipefail
         mkdir -p artifacts
-        container_id=$(docker run -d --name zap --network="host" --user root \
+        container_id=$(docker run -d --name zap --network="host" --shm-size=1g --user root \
           -v "$(pwd):/zap/wrk/:rw" \
           "$ZAP_TUNED_IMAGE" zap.sh -daemon -host 0.0.0.0 -port 8090 \
           -config api.key=tfm-zap-key \
@@ -293,11 +293,18 @@ jobs:
         csrf_origin=""
         authentication_error=null
         reflected_xss_workflow_enabled=false
+        dom_xss_workflow_enabled=false
+        persistent_xss_workflow_enabled=false
+        reflected_xss=false
+        dom_xss=false
+        persistent_xss=false
         if [ "$EXPERIMENT_SCENARIO" = "tuned" ] || [ "$EXPERIMENT_SCENARIO" = "tuned-ai" ]; then
           browser_seed_enabled=true
           authenticated_workflow_enabled=true
           cart_workflow_enabled=true
           reflected_xss_workflow_enabled=true
+          dom_xss_workflow_enabled=true
+          persistent_xss_workflow_enabled=true
         fi
         if [ -f artifacts/browser-workflow.json ]; then
           csrf_validation_enabled=$(python -c 'import json; print(str(json.load(open("artifacts/browser-workflow.json"))["csrfValidation"]).lower())')
@@ -314,6 +321,9 @@ jobs:
           csrf_username_after=$(python -c 'import json; print(json.dumps(json.load(open("artifacts/browser-workflow.json")).get("csrfUsernameAfter")))')
           csrf_origin=$(python -c 'import json; print(json.load(open("artifacts/browser-workflow.json")).get("csrfOrigin", ""))')
           authentication_error=$(python -c 'import json; print(json.dumps(json.load(open("artifacts/browser-workflow.json")).get("authenticationError")))')
+          reflected_xss=$(python -c 'import json; print(str(json.load(open("artifacts/browser-workflow.json")).get("reflectedXss", False)).lower())')
+          dom_xss=$(python -c 'import json; print(str(json.load(open("artifacts/browser-workflow.json")).get("domXss", False)).lower())')
+          persistent_xss=$(python -c 'import json; print(str(json.load(open("artifacts/browser-workflow.json")).get("persistentXss", False)).lower())')
         fi
         cat > artifacts/metadata.json <<EOF
         {
@@ -343,6 +353,11 @@ jobs:
           "csrf_origin": "${csrf_origin}",
           "authentication_error": ${authentication_error},
           "reflected_xss_workflow_enabled": ${reflected_xss_workflow_enabled},
+          "dom_xss_workflow_enabled": ${dom_xss_workflow_enabled},
+          "persistent_xss_workflow_enabled": ${persistent_xss_workflow_enabled},
+          "reflected_xss": ${reflected_xss},
+          "dom_xss": ${dom_xss},
+          "persistent_xss": ${persistent_xss},
           "ai_enabled": $([ "$EXPERIMENT_SCENARIO" = "tuned-ai" ] && echo true || echo false)
         }
         EOF
