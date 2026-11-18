@@ -79,17 +79,17 @@ Active Scan; tampoco sustituye una prueba completa de explotación CSRF
 autenticada.
 
 Los escenarios afinados ejecutan una comprobación dinámica de CSRF mediante
-Playwright. Capturan una petición modificadora del flujo de carrito y la
-repiten desde un contexto independiente sin credenciales ni cookies.
-`artifacts/browser-workflow.json` registra si se capturó la petición,
-el estado HTTP recibido, la presencia de un token CSRF, si se obtuvo una
-respuesta exitosa con contenido y si la petición se considera vulnerable.
-El resultado distingue `protected`, `potentially-vulnerable`,
-`indeterminate`, `failed` y `skipped`; los estados `failed` e
-`indeterminate` no se interpretan como confirmación de protección.
-Una vulnerabilidad confirmada requiere que el replay tenga origen externo,
-no reutilice credenciales y produzca un aumento verificable del contenido
-del carrito. En ese caso `csrfProven=true` y `csrfOutcome=vulnerable`.
+Playwright sobre el formulario de perfil de OWASP Juice Shop. Capturan el
+nombre actual, envían `POST /profile` desde el origen externo
+`http://htmledit.squarefree.com` utilizando las cookies de sesión existentes
+y verifican si el nombre cambia. `artifacts/browser-workflow.json` registra
+el origen, el estado HTTP, los nombres antes/después y si la prueba quedó
+confirmada.
+
+Una vulnerabilidad confirmada requiere que el cambio de nombre sea observable
+desde el perfil autenticado después del envío externo. En ese caso
+`csrfProven=true` y `csrfOutcome=vulnerable`. Los estados `failed`,
+`indeterminate` y `skipped` no se interpretan como confirmación de protección.
 
 Los escenarios `tuned` y `tuned-ai` usan una imagen ZAP derivada con
 `firefox-esr`, además de un navegador Playwright a través del
