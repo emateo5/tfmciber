@@ -530,28 +530,38 @@ async function runReflectedXssWorkflow() {
   xssUrl.searchParams.set("q", payload);
 
   let dialogDetected = false;
+  let payloadReflected = false;
   const dialogHandler = async dialog => {
-    if (dialog.type() !== "alert") {
-      await dialog.dismiss().catch(() => undefined);
-      return;
-    }
-    dialogDetected = true;
+    dialogDetected = dialog.message() === "xss";
     await dialog.dismiss().catch(() => undefined);
   };
 
   page.on("dialog", dialogHandler);
   try {
-    await page.goto(xssUrl.href, { waitUntil: "networkidle", timeout: 30000 });
+    const response = await context.request.get(xssUrl.href, {
+      timeout: 30000,
+    });
+    const body = await response.text();
+    payloadReflected = body.includes(payload);
+
+    await page.goto(
+      new URL(`/#/search?q=${encodeURIComponent(payload)}`, targetUrl.origin).href,
+      { waitUntil: "networkidle", timeout: 30000 }
+    );
     await page.waitForTimeout(1500);
   } finally {
     page.off("dialog", dialogHandler);
   }
 
   const payloadFrames = await page.locator(
-    'iframe[src^="javascript:"]'
+    'iframe[src="javascript:alert(`xss`)"]'
   ).count();
-  workflow.reflectedXss = dialogDetected || payloadFrames > 0;
-  console.log(`WORKFLOW reflected_xss=${workflow.reflectedXss}`);
+  workflow.reflectedXss =
+    payloadReflected && (dialogDetected || payloadFrames > 0);
+  console.log(
+    `WORKFLOW reflected_xss=${workflow.reflectedXss} ` +
+    `reflected=${payloadReflected} dialog=${dialogDetected} frames=${payloadFrames}`
+  );
 }
 
 async function runDomXssWorkflow() {
@@ -561,11 +571,7 @@ async function runDomXssWorkflow() {
 
   let dialogDetected = false;
   const dialogHandler = async dialog => {
-    if (dialog.type() !== "alert") {
-      await dialog.dismiss().catch(() => undefined);
-      return;
-    }
-    dialogDetected = true;
+    dialogDetected = dialog.message() === "xss";
     await dialog.dismiss().catch(() => undefined);
   };
 
@@ -578,7 +584,7 @@ async function runDomXssWorkflow() {
   }
 
   const payloadFrames = await page.locator(
-    'iframe[src^="javascript:"]'
+    'iframe[src="javascript:alert(`xss`)"]'
   ).count();
   workflow.domXss = dialogDetected || payloadFrames > 0;
   console.log(`WORKFLOW dom_xss=${workflow.domXss}`);
@@ -628,18 +634,29 @@ async function runPersistentXssWorkflow() {
     payloadStored = JSON.stringify(reviews).includes(payload);
   }
 
-  await page.goto(
-    new URL(`/#/search?q=${encodeURIComponent("Apple")}`, targetUrl.origin).href,
-    { waitUntil: "networkidle", timeout: 30000 }
-  );
-  await page.waitForTimeout(1500);
-  const content = await page.content();
+  let persistentDialogDetected = false;
+  const dialogHandler = async dialog => {
+    persistentDialogDetected = dialog.message() === "xss";
+    await dialog.dismiss().catch(() => undefined);
+  };
+  page.on("dialog", dialogHandler);
+  try {
+    await page.goto(
+      new URL(`/#/product/1`, targetUrl.origin).href,
+      { waitUntil: "networkidle", timeout: 30000 }
+    );
+    await page.waitForTimeout(1500);
+  } finally {
+    page.off("dialog", dialogHandler);
+  }
+  const payloadFrames = await page.locator(
+    'iframe[src="javascript:alert(`xss`)"]'
+  ).count();
   workflow.persistentXss =
     response.status() >= 200 &&
     response.status() < 300 &&
-    (payloadStored ||
-      content.includes(payload) ||
-      await page.locator("iframe").count() > 0);
+    payloadStored &&
+    (persistentDialogDetected || payloadFrames > 0);
   console.log(
     `WORKFLOW persistent_xss=${workflow.persistentXss} ` +
     `status=${response.status()}`
