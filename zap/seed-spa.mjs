@@ -42,9 +42,7 @@ const workflow = {
   xssChallengeEvents: [],
   xssPayload: '<iframe src="javascript:alert(`xss`)">',
 };
-let cartRequest;
 let loginToken = null;
-let basketIdFromLogin = null;
 const xssChallengeEvents = [];
 
 const browser = await chromium.launch({
@@ -76,43 +74,6 @@ await page.route("**/*", async route => {
 
 page.on("request", request => {
   const method = request.method();
-  if (
-    ["POST", "PUT", "PATCH"].includes(method) &&
-    /\/api\/BasketItems(?:\/\d+)?\/?/i.test(request.url())
-  ) {
-    const headers = request.headers();
-    try {
-      const postData = request.postData();
-      const payload = postData ? JSON.parse(postData) : {};
-      cartRequest = {
-        url: request.url(),
-        method,
-        postData,
-        payload,
-        contentType: headers["content-type"] || "application/json",
-        authorization: headers.authorization,
-        csrfTokenPresent: Object.keys(headers).some(name =>
-          /^(csrf|x-csrf|x-xsrf|anti-csrf)/i.test(name)
-        ),
-      };
-      workflow.csrfRequestCaptured = Boolean(
-        cartRequest.url &&
-        cartRequest.method &&
-        cartRequest.postData &&
-        cartRequest.payload?.BasketId
-      );
-      if (workflow.csrfRequestCaptured) {
-        console.log(
-          `CSRF_CAPTURE basket=${cartRequest.payload.BasketId} ` +
-          `product=${cartRequest.payload.ProductId} ` +
-          `method=${cartRequest.method}`
-        );
-      }
-    } catch (error) {
-      workflow.csrfRequestCaptured = false;
-      workflow.csrfError = `cart_request_capture_failed=${error.message}`;
-    }
-  }
   if (method !== "GET" || /\/rest\/|\/api\//i.test(request.url())) {
     console.log(`BROWSER ${method} ${request.url()}`);
   }
@@ -130,13 +91,6 @@ page.on("response", async response => {
     loginToken = body?.authentication?.token || null;
     if (!loginToken) {
       return;
-    }
-    const encodedPayload = loginToken.split(".")[1];
-    if (encodedPayload) {
-      const claims = JSON.parse(
-        Buffer.from(encodedPayload, "base64").toString("utf8")
-      );
-      basketIdFromLogin = claims.bid ? String(claims.bid) : null;
     }
   } catch (error) {
     console.log(`LOGIN_RESPONSE_ERROR ${error.message}`);
@@ -204,9 +158,6 @@ async function runAuthenticatedWorkflow() {
     const loginStatus = loginResponse.status();
     const loginBody = await loginResponse.json().catch(() => null);
     loginToken = loginBody?.authentication?.token || null;
-    basketIdFromLogin = loginBody?.authentication?.bid
-      ? String(loginBody.authentication.bid)
-      : null;
 
     if (loginStatus !== 200 || !loginToken) {
       throw new Error(
@@ -332,53 +283,6 @@ async function runAuthenticatedWorkflow() {
   await page.waitForTimeout(1000);
   workflow.cart = await clickFirstMatchingText(/add to basket|add to cart/i);
   console.log(`WORKFLOW cart=${workflow.cart}`);
-  await page.waitForTimeout(1500);
-
-  if (!cartRequest && basketIdFromLogin) {
-    const storageToken = await page.evaluate(() =>
-      localStorage.getItem("token")
-    ).catch(() => null);
-    const authorization = loginToken
-      ? `Bearer ${loginToken}`
-      : (storageToken ? `Bearer ${storageToken}` : null);
-
-    if (authorization) {
-      const productsResponse = await page.evaluate(async ({ origin, authorization }) => {
-        const response = await fetch(`${origin}/api/Products?limit=1`, {
-          headers: { Authorization: authorization },
-        });
-        if (!response.ok) {
-          return null;
-        }
-        const body = await response.json();
-        return Array.isArray(body?.data) ? body.data[0] : null;
-      }, { origin: targetUrl.origin, authorization }).catch(() => null);
-
-      if (productsResponse?.id) {
-        cartRequest = {
-          url: `${targetUrl.origin}/api/BasketItems/`,
-          method: "POST",
-          postData: JSON.stringify({
-            ProductId: productsResponse.id,
-            BasketId: basketIdFromLogin,
-            quantity: 1,
-          }),
-          payload: {
-            ProductId: productsResponse.id,
-            BasketId: basketIdFromLogin,
-            quantity: 1,
-          },
-          contentType: "application/json",
-          authorization,
-          csrfTokenPresent: false,
-        };
-        workflow.csrfRequestCaptured = true;
-        console.log(
-          `CSRF_CAPTURE fallback basket=${basketIdFromLogin} product=${productsResponse.id}`
-        );
-      }
-    }
-  }
 }
 
 async function runCsrfWorkflow() {
@@ -550,7 +454,6 @@ async function runReflectedXssWorkflow() {
 
   let dialogDetected = false;
   let responsePayloadReflected = false;
-  let payloadExecuted = false;
   const dialogHandler = async dialog => {
     dialogDetected = dialog.message() === "xss";
     await dialog.dismiss().catch(() => undefined);
@@ -569,9 +472,6 @@ async function runReflectedXssWorkflow() {
       { waitUntil: "networkidle", timeout: 30000 }
     );
     await page.waitForTimeout(1500);
-    payloadExecuted = await page.locator(
-      'iframe[src="javascript:alert(`xss`)"]'
-    ).count() > 0;
   } finally {
     page.off("dialog", dialogHandler);
   }
