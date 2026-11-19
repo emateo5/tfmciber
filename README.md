@@ -85,6 +85,8 @@ La prueba reflejada diferencia respuesta servidor y ejecución cliente:
 ejecución DOM, no como XSS reflejado. La prueba SQLi solo se marca como
 confirmada si una consulta amplía los resultados o el login inyectado devuelve
 un token; un HTTP 500 se conserva como indicio, no como explotación.
+Los informes ZAP se filtran al origen objetivo y se excluye GitHub; los
+hallazgos pasivos externos no se incluyen en las métricas del TFM.
 
 Los escenarios afinados ejecutan una comprobación dinámica de CSRF mediante
 Playwright sobre el formulario de perfil de OWASP Juice Shop. Capturan el
