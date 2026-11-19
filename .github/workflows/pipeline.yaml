@@ -144,7 +144,10 @@ jobs:
           -v "$(pwd):/zap/wrk/:rw" \
           "$ZAP_TUNED_IMAGE" zap.sh -daemon -host 0.0.0.0 -port 8090 \
           -config api.key=tfm-zap-key \
-          -config log.file=/zap/wrk/artifacts/zap-internal.log)
+          -config log.file=/zap/wrk/artifacts/zap-internal.log \
+          -config rules.domxss.browserid=firefox-headless \
+          -config autoUpdate.checkOnStart=false \
+          -config autoUpdate.installAddonUpdates=false)
         echo "Contenedor ZAP: ${container_id}"
         for attempt in {1..60}; do
           if curl --silent --fail \
@@ -155,6 +158,9 @@ jobs:
               > artifacts/firefox-headless-check.txt
             docker exec zap cat /tmp/firefox-check.log > artifacts/firefox-headless.log 2>&1 || true
             docker exec zap geckodriver --version > artifacts/geckodriver-check.txt 2>&1 || true
+            docker exec zap sh -c 'timeout 30 geckodriver --binary /usr/bin/firefox-esr --port 4445 >/tmp/geckodriver-check.log 2>&1 & driver_pid=$!; sleep 3; curl --silent --fail http://127.0.0.1:4445/status >/tmp/geckodriver-status.json 2>/dev/null || true; kill $driver_pid >/dev/null 2>&1 || true; wait $driver_pid >/dev/null 2>&1 || true' || true
+            docker exec zap cat /tmp/geckodriver-check.log > artifacts/geckodriver-check.log 2>&1 || true
+            docker exec zap cat /tmp/geckodriver-status.json > artifacts/geckodriver-status.json 2>&1 || true
             exit 0
           fi
           sleep 2

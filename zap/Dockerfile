@@ -10,6 +10,8 @@ ENV HOME=/tmp/zap-firefox-home
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl firefox-esr; \
+    mkdir -p /root/.ZAP /tmp/zap-firefox-home /zap/wrk/artifacts; \
+    chmod 0700 /root/.ZAP /tmp/zap-firefox-home /zap/wrk/artifacts; \
     curl --fail --silent --show-error --location \
         "https://github.com/mozilla/geckodriver/releases/download/v${GECKODRIVER_VERSION}/geckodriver-v${GECKODRIVER_VERSION}-linux64.tar.gz" \
         --output /tmp/geckodriver.tar.gz; \
