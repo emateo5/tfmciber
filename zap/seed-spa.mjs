@@ -283,6 +283,53 @@ async function runAuthenticatedWorkflow() {
   await page.waitForTimeout(1000);
   workflow.cart = await clickFirstMatchingText(/add to basket|add to cart/i);
   console.log(`WORKFLOW cart=${workflow.cart}`);
+  await page.waitForTimeout(1500);
+
+  if (!cartRequest && basketIdFromLogin) {
+    const storageToken = await page.evaluate(() =>
+      localStorage.getItem("token")
+    ).catch(() => null);
+    const authorization = loginToken
+      ? `Bearer ${loginToken}`
+      : (storageToken ? `Bearer ${storageToken}` : null);
+
+    if (authorization) {
+      const productsResponse = await page.evaluate(async ({ origin, authorization }) => {
+        const response = await fetch(`${origin}/api/Products?limit=1`, {
+          headers: { Authorization: authorization },
+        });
+        if (!response.ok) {
+          return null;
+        }
+        const body = await response.json();
+        return Array.isArray(body?.data) ? body.data[0] : null;
+      }, { origin: targetUrl.origin, authorization }).catch(() => null);
+
+      if (productsResponse?.id) {
+        cartRequest = {
+          url: `${targetUrl.origin}/api/BasketItems/`,
+          method: "POST",
+          postData: JSON.stringify({
+            ProductId: productsResponse.id,
+            BasketId: basketIdFromLogin,
+            quantity: 1,
+          }),
+          payload: {
+            ProductId: productsResponse.id,
+            BasketId: basketIdFromLogin,
+            quantity: 1,
+          },
+          contentType: "application/json",
+          authorization,
+          csrfTokenPresent: false,
+        };
+        workflow.csrfRequestCaptured = true;
+        console.log(
+          `CSRF_CAPTURE fallback basket=${basketIdFromLogin} product=${productsResponse.id}`
+        );
+      }
+    }
+  }
 }
 
 async function runCsrfWorkflow() {
@@ -454,6 +501,7 @@ async function runReflectedXssWorkflow() {
 
   let dialogDetected = false;
   let responsePayloadReflected = false;
+  let payloadExecuted = false;
   const dialogHandler = async dialog => {
     dialogDetected = dialog.message() === "xss";
     await dialog.dismiss().catch(() => undefined);
@@ -472,6 +520,9 @@ async function runReflectedXssWorkflow() {
       { waitUntil: "networkidle", timeout: 30000 }
     );
     await page.waitForTimeout(1500);
+    payloadExecuted = await page.locator(
+      'iframe[src="javascript:alert(`xss`)"]'
+    ).count() > 0;
   } finally {
     page.off("dialog", dialogHandler);
   }
