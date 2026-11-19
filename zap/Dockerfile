@@ -3,6 +3,10 @@ FROM zaproxy/zap-stable
 USER root
 ARG GECKODRIVER_VERSION=0.36.0
 ENV MOZ_DISABLE_CONTENT_SANDBOX=1
+ENV MOZ_DISABLE_RDD_SANDBOX=1
+ENV MOZ_HEADLESS=1
+ENV MOZ_WEBRENDER=0
+ENV HOME=/tmp/zap-firefox-home
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl firefox-esr; \

@@ -33,11 +33,16 @@ const workflow = {
   reflectedXss: false,
   domXss: false,
   persistentXss: false,
+  reflectedXssEvidence: null,
+  domXssEvidence: null,
+  persistentXssEvidence: null,
+  xssChallengeEvents: [],
   xssPayload: '<iframe src="javascript:alert(`xss`)">',
 };
 let cartRequest;
 let loginToken = null;
 let basketIdFromLogin = null;
+const xssChallengeEvents = [];
 
 const browser = await chromium.launch({
   headless: true,
@@ -45,6 +50,17 @@ const browser = await chromium.launch({
 });
 const context = await browser.newContext({ ignoreHTTPSErrors: true });
 const page = await context.newPage();
+
+page.on("websocket", websocket => {
+  websocket.on("framereceived", event => {
+    const payload = typeof event.payload === "string"
+      ? event.payload
+      : String(event.payload);
+    if (/challenge solved|localXssChallenge|xss/i.test(payload)) {
+      xssChallengeEvents.push(payload);
+    }
+  });
+});
 
 await page.route("**/*", async route => {
   const requestUrl = new URL(route.request().url());
@@ -558,6 +574,11 @@ async function runReflectedXssWorkflow() {
   ).count();
   workflow.reflectedXss =
     payloadReflected && (dialogDetected || payloadFrames > 0);
+  workflow.reflectedXssEvidence = {
+    payloadReflected,
+    dialogDetected,
+    frameCount: payloadFrames,
+  };
   console.log(
     `WORKFLOW reflected_xss=${workflow.reflectedXss} ` +
     `reflected=${payloadReflected} dialog=${dialogDetected} frames=${payloadFrames}`
@@ -587,6 +608,13 @@ async function runDomXssWorkflow() {
     'iframe[src="javascript:alert(`xss`)"]'
   ).count();
   workflow.domXss = dialogDetected || payloadFrames > 0;
+  workflow.domXssEvidence = {
+    dialogDetected,
+    frameCount: payloadFrames,
+    challengeEvents: xssChallengeEvents.filter(event =>
+      /localXssChallenge|DOM XSS|challenge solved/i.test(event)
+    ),
+  };
   console.log(`WORKFLOW dom_xss=${workflow.domXss}`);
 }
 
@@ -657,6 +685,12 @@ async function runPersistentXssWorkflow() {
     response.status() < 300 &&
     payloadStored &&
     (persistentDialogDetected || payloadFrames > 0);
+  workflow.persistentXssEvidence = {
+    status: response.status(),
+    payloadStored,
+    dialogDetected: persistentDialogDetected,
+    frameCount: payloadFrames,
+  };
   console.log(
     `WORKFLOW persistent_xss=${workflow.persistentXss} ` +
     `status=${response.status()}`
@@ -714,6 +748,7 @@ await runPersistentXssWorkflow().catch(error =>
 );
 
 console.log(`BROWSER_SUMMARY visited=${visited.size} pending=${pending.length}`);
+workflow.xssChallengeEvents = [...new Set(xssChallengeEvents)];
 console.log(`WORKFLOW_SUMMARY ${JSON.stringify(workflow)}`);
 await writeFile(
   process.env.BROWSER_WORKFLOW_REPORT || "artifacts/browser-workflow.json",

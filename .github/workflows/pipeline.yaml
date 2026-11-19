@@ -150,6 +150,11 @@ jobs:
           if curl --silent --fail \
             "http://127.0.0.1:8090/JSON/core/view/version/?apikey=tfm-zap-key"; then
             echo
+            docker exec zap mkdir -p /tmp/zap-firefox-home
+            docker exec zap sh -c 'timeout 30 firefox-esr --headless --screenshot /tmp/firefox-check.png about:blank >/tmp/firefox-check.log 2>&1; echo $?' \
+              > artifacts/firefox-headless-check.txt
+            docker exec zap cat /tmp/firefox-check.log > artifacts/firefox-headless.log 2>&1 || true
+            docker exec zap geckodriver --version > artifacts/geckodriver-check.txt 2>&1 || true
             exit 0
           fi
           sleep 2
@@ -298,6 +303,10 @@ jobs:
         reflected_xss=false
         dom_xss=false
         persistent_xss=false
+        reflected_xss_evidence=null
+        dom_xss_evidence=null
+        persistent_xss_evidence=null
+        xss_challenge_events=[]
         if [ "$EXPERIMENT_SCENARIO" = "tuned" ] || [ "$EXPERIMENT_SCENARIO" = "tuned-ai" ]; then
           browser_seed_enabled=true
           authenticated_workflow_enabled=true
@@ -324,6 +333,10 @@ jobs:
           reflected_xss=$(python -c 'import json; print(str(json.load(open("artifacts/browser-workflow.json")).get("reflectedXss", False)).lower())')
           dom_xss=$(python -c 'import json; print(str(json.load(open("artifacts/browser-workflow.json")).get("domXss", False)).lower())')
           persistent_xss=$(python -c 'import json; print(str(json.load(open("artifacts/browser-workflow.json")).get("persistentXss", False)).lower())')
+          reflected_xss_evidence=$(python -c 'import json; print(json.dumps(json.load(open("artifacts/browser-workflow.json")).get("reflectedXssEvidence")))')
+          dom_xss_evidence=$(python -c 'import json; print(json.dumps(json.load(open("artifacts/browser-workflow.json")).get("domXssEvidence")))')
+          persistent_xss_evidence=$(python -c 'import json; print(json.dumps(json.load(open("artifacts/browser-workflow.json")).get("persistentXssEvidence")))')
+          xss_challenge_events=$(python -c 'import json; print(json.dumps(json.load(open("artifacts/browser-workflow.json")).get("xssChallengeEvents", [])))')
         fi
         cat > artifacts/metadata.json <<EOF
         {
@@ -358,6 +371,10 @@ jobs:
           "reflected_xss": ${reflected_xss},
           "dom_xss": ${dom_xss},
           "persistent_xss": ${persistent_xss},
+          "reflected_xss_evidence": ${reflected_xss_evidence},
+          "dom_xss_evidence": ${dom_xss_evidence},
+          "persistent_xss_evidence": ${persistent_xss_evidence},
+          "xss_challenge_events": ${xss_challenge_events},
           "ai_enabled": $([ "$EXPERIMENT_SCENARIO" = "tuned-ai" ] && echo true || echo false)
         }
         EOF
