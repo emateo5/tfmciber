@@ -146,7 +146,6 @@ jobs:
           "$ZAP_TUNED_IMAGE" zap.sh -daemon -host 0.0.0.0 -port 8090 \
           -config api.key=tfm-zap-key \
           -config log.file=/zap/wrk/artifacts/zap-internal.log \
-          -config rules.domxss.browserid=chrome-headless \
           -config scanner.threadsPerHost=1 \
           -config scanner.threadsPerScan=1 \
           -config autoUpdate.checkOnStart=false \

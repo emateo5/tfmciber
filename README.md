@@ -73,10 +73,12 @@ La comparación principal del TFM es `stock` frente a `tuned` frente a
 única diferencia es el postprocesamiento con IA. La IA ayuda a priorizar y
 revisar falsos positivos, pero no sustituye el resultado bruto de ZAP.
 
-La política afinada incluye SQL Injection, XSS reflejado, persistente y DOM.
-La detección de tokens CSRF es pasiva y no forma parte de la política de
-Active Scan; tampoco sustituye una prueba completa de explotación CSRF
-autenticada.
+La política afinada incluye SQL Injection y XSS reflejado/persistente.
+DOM XSS se valida dinámicamente con Playwright/Chromium porque el
+`DomXssScanRule` integrado no pudo ejecutarse de forma fiable en ZAP con
+Selenium en GitHub Actions. La detección de tokens CSRF es pasiva y no forma
+parte de la política de Active Scan; tampoco sustituye una prueba completa
+de explotación CSRF autenticada.
 
 Los escenarios afinados ejecutan una comprobación dinámica de CSRF mediante
 Playwright sobre el formulario de perfil de OWASP Juice Shop. Capturan el
@@ -95,7 +97,8 @@ Además de ZAP, los escenarios afinados ejecutan comprobaciones dinámicas de
 XSS en Juice Shop: el payload oficial se usa en búsqueda para XSS reflejado,
 en la ruta hash de búsqueda para DOM XSS y en una reseña persistente mediante
 la API REST. Los resultados se publican como `reflectedXss`, `domXss` y
-`persistentXss` en `browser-workflow.json`.
+`persistentXss` en `browser-workflow.json`. DOM XSS no depende de la alerta
+ZAP `40026`.
 
 Los escenarios `tuned` y `tuned-ai` usan una imagen ZAP derivada con
 Chromium/Chromedriver, además de un navegador Playwright a través del
