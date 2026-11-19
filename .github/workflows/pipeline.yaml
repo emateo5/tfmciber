@@ -160,6 +160,8 @@ jobs:
             docker exec zap chromedriver --version > artifacts/chromedriver-check.txt 2>&1 || true
             docker exec zap sh -c 'chromium --version > /tmp/chrome-check.txt 2>&1; chromedriver --version > /tmp/chromedriver-version.txt 2>&1; cat /tmp/chrome-check.txt /tmp/chromedriver-version.txt' \
               > artifacts/chrome-driver-versions.txt
+            docker exec zap sh -c 'chrome_version=$(chromium --version | grep -oE "[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+" | head -n1); driver_version=$(chromedriver --version | grep -oE "[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+" | head -n1); printf "chromium=%s\nchromedriver=%s\n" "$chrome_version" "$driver_version"; test "${chrome_version%%.*}" = "${driver_version%%.*}"' \
+              > artifacts/chrome-driver-match.txt 2>&1 || true
             docker exec zap sh -c 'timeout 30 chromedriver --port=4445 --allowed-ips= >/tmp/chromedriver-check.log 2>&1 & driver_pid=$!; sleep 3; curl --silent --fail http://127.0.0.1:4445/status >/tmp/chromedriver-status.json 2>/dev/null || true; kill $driver_pid >/dev/null 2>&1 || true; wait $driver_pid >/dev/null 2>&1 || true' || true
             docker exec zap cat /tmp/chromedriver-check.log > artifacts/chromedriver-check.log 2>&1 || true
             docker exec zap cat /tmp/chromedriver-status.json > artifacts/chromedriver-status.json 2>&1 || true

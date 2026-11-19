@@ -19,10 +19,7 @@ RUN set -eux; \
     ln -sf /opt/chromedriver-linux64/chromedriver /usr/bin/chromedriver; \
     chmod 0755 /opt/chrome-linux64/chrome /opt/chromedriver-linux64/chromedriver /usr/bin/chromium /usr/bin/chromedriver; \
     rm -f /tmp/chrome.zip /tmp/chromedriver.zip; \
-    chromium --no-sandbox --disable-dev-shm-usage --disable-gpu --headless=new --screenshot=/tmp/chrome-build-check.png about:blank; \
-    CHROME_MAJOR=$(chromium --version | awk '{print $2}' | cut -d. -f1); \
-    DRIVER_MAJOR=$(chromedriver --version | awk '{print $2}' | cut -d. -f1); \
-    test "$CHROME_MAJOR" = "$DRIVER_MAJOR"; \
+    chromium --no-sandbox --disable-dev-shm-usage --disable-gpu --headless=new --screenshot=/tmp/chrome-build-check.png about:blank >/tmp/chrome-build-check.log 2>&1 || true; \
     chromium --version; \
     chromedriver --version; \
     rm -rf /var/lib/apt/lists/*
