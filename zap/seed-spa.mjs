@@ -547,6 +547,7 @@ async function runReflectedXssWorkflow() {
 
   let dialogDetected = false;
   let payloadReflected = false;
+  let challengeDetected = false;
   const dialogHandler = async dialog => {
     dialogDetected = dialog.message() === "xss";
     await dialog.dismiss().catch(() => undefined);
@@ -565,6 +566,12 @@ async function runReflectedXssWorkflow() {
       { waitUntil: "networkidle", timeout: 30000 }
     );
     await page.waitForTimeout(1500);
+    payloadReflected = await page.locator(
+      'iframe[src="javascript:alert(`xss`)"]'
+    ).count() > 0;
+    challengeDetected = xssChallengeEvents.some(event =>
+      /reflected|XSS/i.test(event)
+    );
   } finally {
     page.off("dialog", dialogHandler);
   }
@@ -573,11 +580,13 @@ async function runReflectedXssWorkflow() {
     'iframe[src="javascript:alert(`xss`)"]'
   ).count();
   workflow.reflectedXss =
-    payloadReflected && (dialogDetected || payloadFrames > 0);
+    payloadReflected &&
+    (dialogDetected || payloadFrames > 0);
   workflow.reflectedXssEvidence = {
     payloadReflected,
     dialogDetected,
     frameCount: payloadFrames,
+    challengeDetected,
   };
   console.log(
     `WORKFLOW reflected_xss=${workflow.reflectedXss} ` +
@@ -690,6 +699,9 @@ async function runPersistentXssWorkflow() {
     payloadStored,
     dialogDetected: persistentDialogDetected,
     frameCount: payloadFrames,
+    challengeEvents: xssChallengeEvents.filter(event =>
+      /XSS|challenge solved/i.test(event)
+    ),
   };
   console.log(
     `WORKFLOW persistent_xss=${workflow.persistentXss} ` +
