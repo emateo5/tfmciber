@@ -2,6 +2,9 @@ FROM zaproxy/zap-stable
 
 USER root
 ARG CHROME_VERSION=158.0.8127.36
+ENV HOME=/tmp/zap-chrome-profile
+ENV TMPDIR=/tmp/zap-chrome-profile
+ENV CHROME_CONFIG_HOME=/tmp/zap-chrome-profile
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl unzip fonts-liberation libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 libcups2 libdrm2 libgbm1 libgtk-3-0 libnss3 libxcomposite1 libxdamage1 libxfixes3 libxkbcommon0 libxrandr2 xvfb; \

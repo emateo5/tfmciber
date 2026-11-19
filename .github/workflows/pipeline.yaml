@@ -140,12 +140,15 @@ jobs:
       run: |
         set -euo pipefail
         mkdir -p artifacts
-        container_id=$(docker run -d --name zap --network="host" --shm-size=1g --user root \
+        docker image prune --filter "dangling=true" -f >/dev/null 2>&1 || true
+        container_id=$(docker run -d --name zap --network="host" --shm-size=2g --user root \
           -v "$(pwd):/zap/wrk/:rw" \
           "$ZAP_TUNED_IMAGE" zap.sh -daemon -host 0.0.0.0 -port 8090 \
           -config api.key=tfm-zap-key \
           -config log.file=/zap/wrk/artifacts/zap-internal.log \
           -config rules.domxss.browserid=chrome-headless \
+          -config scanner.threadsPerHost=1 \
+          -config scanner.threadsPerScan=1 \
           -config autoUpdate.checkOnStart=false \
           -config autoUpdate.installAddonUpdates=false)
         echo "Contenedor ZAP: ${container_id}"
@@ -154,6 +157,7 @@ jobs:
             "http://127.0.0.1:8090/JSON/core/view/version/?apikey=tfm-zap-key"; then
             echo
             docker exec zap mkdir -p /tmp/zap-chrome-profile
+            docker exec zap sh -c 'rm -rf /tmp/zap-client-profile /tmp/zap-firefox-profile /root/.ZAP/zap-client-profile /root/.ZAP/firefox-profile 2>/dev/null || true'
             docker exec zap sh -c 'timeout 30 chromium --headless=new --no-sandbox --disable-dev-shm-usage --screenshot=/tmp/chrome-check.png about:blank >/tmp/chrome-headless.log 2>&1; echo $?' \
               > artifacts/chrome-headless-check.txt
             docker exec zap cat /tmp/chrome-headless.log > artifacts/chrome-headless.log 2>&1 || true
