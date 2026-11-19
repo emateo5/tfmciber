@@ -309,21 +309,29 @@ jobs:
             json.dump(report, destination, ensure_ascii=False, indent=2)
 
         if os.path.exists(html_path):
-            with open(html_path, "r", encoding="utf-8") as source:
-                html = source.read()
-            html = re.sub(
-                r"<h2>\s*Sites:\s*(?:https?://[^<]*github\.com[^<]*|.*github\.com.*)\s*</h2>",
-                f"<h2>Sites: {target_origin}</h2>",
-                html,
-                flags=re.IGNORECASE | re.DOTALL,
+            sections = []
+            for site in report.get("site", []):
+                for alert in site.get("alerts", []):
+                    instances = alert.get("instances", [])
+                    sections.append(
+                        "<tr>"
+                        f"<td>{alert.get('pluginid', '')}</td>"
+                        f"<td>{alert.get('name', '')}</td>"
+                        f"<td>{alert.get('riskdesc', '')}</td>"
+                        f"<td>{len(instances)}</td>"
+                        "</tr>"
+                    )
+            html = (
+                "<!doctype html><html><head><meta charset=\"utf-8\">"
+                "<title>ZAP target-only report</title>"
+                "<style>body{font-family:sans-serif}table{border-collapse:collapse}"
+                "th,td{border:1px solid #ccc;padding:6px}</style></head><body>"
+                f"<h1>ZAP target-only report</h1><p>Target: {target_origin}</p>"
+                "<table><tr><th>Plugin ID</th><th>Name</th>"
+                "<th>Risk</th><th>Instances</th></tr>"
+                + "".join(sections)
+                + "</table></body></html>"
             )
-            github_tables = re.compile(
-                r'<table class="results">(?:(?!<table class="results">).)*'
-                r'https://github\.com(?:(?!<table class="results">).)*'
-                r'</table>\s*<div class="spacer"></div>',
-                re.DOTALL,
-            )
-            html = github_tables.sub("", html)
             with open(html_path, "w", encoding="utf-8") as destination:
                 destination.write(html)
         PY
