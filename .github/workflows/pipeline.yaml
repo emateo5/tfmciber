@@ -28,8 +28,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      EXPERIMENT_SCENARIO: ${{ github.event_name == 'workflow_dispatch' && inputs.experiment_scenario || 'baseline' }}
-      TARGET_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.target_url || 'http://localhost:3000' }}
+      EXPERIMENT_SCENARIO: ${{ inputs.experiment_scenario || 'baseline' }}
+      TARGET_URL: ${{ inputs.target_url || 'http://localhost:3000' }}
       ZAP_IMAGE: zaproxy/zap-stable
       ZAP_TUNED_IMAGE: tfmciber/zap-chromium:2.17.0
 
@@ -60,7 +60,8 @@ jobs:
         import socket
         from urllib.parse import urlparse
 
-        target = urlparse(os.environ["TARGET_URL"])
+        target_url = os.environ["TARGET_URL"].strip() or "http://localhost:3000"
+        target = urlparse(target_url)
         if target.scheme not in {"http", "https"} or not target.hostname:
             raise SystemExit("TARGET_URL debe ser una URL HTTP(S) con host.")
         if target.username or target.password or target.fragment:
