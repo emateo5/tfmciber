@@ -546,7 +546,6 @@ async function runReflectedXssWorkflow() {
   xssUrl.searchParams.set("q", payload);
 
   let dialogDetected = false;
-  let payloadReflected = false;
   let responsePayloadReflected = false;
   const dialogHandler = async dialog => {
     dialogDetected = dialog.message() === "xss";
@@ -566,7 +565,7 @@ async function runReflectedXssWorkflow() {
       { waitUntil: "networkidle", timeout: 30000 }
     );
     await page.waitForTimeout(1500);
-    payloadReflected = await page.locator(
+    payloadExecuted = await page.locator(
       'iframe[src="javascript:alert(`xss`)"]'
     ).count() > 0;
   } finally {
@@ -577,17 +576,18 @@ async function runReflectedXssWorkflow() {
     'iframe[src="javascript:alert(`xss`)"]'
   ).count();
   workflow.reflectedXss =
-    payloadReflected &&
+    responsePayloadReflected &&
     (dialogDetected || payloadFrames > 0);
   workflow.reflectedXssEvidence = {
     responsePayloadReflected,
-    payloadReflected,
+    payloadExecuted: payloadFrames > 0,
     dialogDetected,
     frameCount: payloadFrames,
   };
   console.log(
     `WORKFLOW reflected_xss=${workflow.reflectedXss} ` +
-    `reflected=${payloadReflected} dialog=${dialogDetected} frames=${payloadFrames}`
+    `response_reflected=${responsePayloadReflected} ` +
+    `dialog=${dialogDetected} frames=${payloadFrames}`
   );
 }
 
@@ -641,6 +641,7 @@ async function runPersistentXssWorkflow() {
     "Authorization": `Bearer ${loginToken}`,
     "Content-Type": "application/json",
   };
+  let responseMethod = "PUT";
   let response = await context.request.put(reviewsUrl, {
     headers: requestHeaders,
     data: {
@@ -654,6 +655,7 @@ async function runPersistentXssWorkflow() {
   });
 
   if (!response || (response.status() < 200 || response.status() >= 300)) {
+    responseMethod = "POST";
     response = await context.request.post(reviewsUrl, {
       headers: requestHeaders,
       data: {
@@ -669,6 +671,13 @@ async function runPersistentXssWorkflow() {
 
   if (!response) {
     return;
+  }
+
+  let responseBody = "";
+  try {
+    responseBody = await response.text();
+  } catch {
+    responseBody = "";
   }
 
   let payloadStored = false;
@@ -710,7 +719,9 @@ async function runPersistentXssWorkflow() {
     payloadStored &&
     (persistentDialogDetected || payloadFrames > 0);
   workflow.persistentXssEvidence = {
+    method: responseMethod,
     status: response.status(),
+    responseBody,
     reviewsResponseStatus,
     payloadStored,
     dialogDetected: persistentDialogDetected,
