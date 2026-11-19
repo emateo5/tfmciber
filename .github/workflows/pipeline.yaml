@@ -148,8 +148,12 @@ jobs:
           --health-interval=30s --health-timeout=5s --health-start-period=15s --health-retries=3 \
           -v "$(pwd):/zap/wrk/:rw" \
           "$ZAP_TUNED_IMAGE" zap.sh -daemon -host 0.0.0.0 -port 8090 \
+          -silent \
           -config api.key="$ZAP_API_KEY" \
           -config log.file=/zap/wrk/artifacts/zap-internal.log \
+          -config start.checkForUpdates=false \
+          -config start.checkAddonUpdates=false \
+          -config start.installAddonUpdates=false \
           -config scanner.threadsPerHost=1 \
           -config scanner.threadsPerScan=1 \
           -config scanner.threadPerHost=1 \

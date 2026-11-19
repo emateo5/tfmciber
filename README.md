@@ -80,6 +80,12 @@ Selenium en GitHub Actions. La detección de tokens CSRF es pasiva y no forma
 parte de la política de Active Scan; tampoco sustituye una prueba completa
 de explotación CSRF autenticada.
 
+La prueba reflejada diferencia respuesta servidor y ejecución cliente:
+`responsePayloadReflected=false` con `payloadExecuted=true` se clasifica como
+ejecución DOM, no como XSS reflejado. La prueba SQLi solo se marca como
+confirmada si una consulta amplía los resultados o el login inyectado devuelve
+un token; un HTTP 500 se conserva como indicio, no como explotación.
+
 Los escenarios afinados ejecutan una comprobación dinámica de CSRF mediante
 Playwright sobre el formulario de perfil de OWASP Juice Shop. Capturan el
 nombre actual, envían `POST /profile` desde el origen externo

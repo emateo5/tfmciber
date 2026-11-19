@@ -585,6 +585,9 @@ async function runReflectedXssWorkflow() {
   workflow.reflectedXssEvidence = {
     responsePayloadReflected,
     payloadExecuted: payloadFrames > 0,
+    classification: responsePayloadReflected
+      ? "server-reflected"
+      : "client-side-only",
     dialogDetected,
     frameCount: payloadFrames,
   };
@@ -661,16 +664,60 @@ async function runSqlEffectWorkflow() {
     probeData = [];
   }
 
+  let loginNormalStatus = 0;
+  let loginProbeStatus = 0;
+  let loginProbeToken = false;
+  if (testUsername && testPassword) {
+    try {
+      const normalLogin = await context.request.post(
+        new URL("/rest/user/login", targetUrl.origin).href,
+        {
+          data: { email: testUsername, password: testPassword },
+          headers: { "Content-Type": "application/json" },
+          timeout: 30000,
+        }
+      );
+      loginNormalStatus = normalLogin.status();
+      await normalLogin.text();
+
+      const probeLogin = await context.request.post(
+        new URL("/rest/user/login", targetUrl.origin).href,
+        {
+          data: { email: "' OR 1=1 --", password: "invalid" },
+          headers: { "Content-Type": "application/json" },
+          timeout: 30000,
+        }
+      );
+      loginProbeStatus = probeLogin.status();
+      const probeLoginBody = await probeLogin.text();
+      loginProbeToken = probeLoginStatus === 200 &&
+        probeLoginBody.includes("authentication") &&
+        probeLoginBody.includes("token");
+    } catch (error) {
+      workflow.sqliEvidence = {
+        normalStatus: normalResponse.status(),
+        probeStatus: probeResponse.status(),
+        normalResultCount: normalData.length,
+        probeResultCount: probeData.length,
+        loginError: error.message,
+      };
+    }
+  }
+
   workflow.sqliStatus = probeResponse.status();
   workflow.sqliEffectObserved =
-    probeResponse.status() === 200 &&
-    probeData.length > normalData.length &&
-    probeData.length >= 5;
+    (probeResponse.status() === 200 &&
+      probeData.length > normalData.length &&
+      probeData.length >= 5) ||
+    loginProbeToken;
   workflow.sqliEvidence = {
     normalStatus: normalResponse.status(),
     probeStatus: probeResponse.status(),
     normalResultCount: normalData.length,
     probeResultCount: probeData.length,
+    loginNormalStatus,
+    loginProbeStatus,
+    loginProbeToken,
   };
   console.log(
     `WORKFLOW sqli_effect=${workflow.sqliEffectObserved} ` +
