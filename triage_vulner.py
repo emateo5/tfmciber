@@ -10,23 +10,42 @@ def _html_value(value):
 
 
 def generate_html_report(alerts, output_file):
-        false_positives = sum(
-                alert.get("ai_triage", {}).get("is_false_positive") is True
-                for alert in alerts
-        )
-        high_risk = sum(
-                str(alert.get("riskdesc", "")).lower().startswith("high")
-                for alert in alerts
-        )
-
+        verdict_counts = {
+                "confirmed_false_positive": 0,
+                "confirmed_vulnerability": 0,
+                "inconclusive": 0,
+        }
+        for alert in alerts:
+                verdict = alert.get("ai_triage", {}).get("verdict")
+                if verdict in verdict_counts:
+                        verdict_counts[verdict] += 1
         rows = []
         for alert in alerts:
                 triage = alert.get("ai_triage", {})
-                verdict = triage.get("is_false_positive")
-                verdict_label = "Sí" if verdict is True else "No" if verdict is False else "Sin veredicto"
-                verdict_class = "positive" if verdict is True else "negative" if verdict is False else "unknown"
+                verdict = triage.get("verdict", "inconclusive")
+                verdict_labels = {
+                        "confirmed_false_positive": "Falso positivo confirmado",
+                        "confirmed_vulnerability": "Vulnerabilidad confirmada",
+                        "inconclusive": "No concluyente",
+                }
+                verdict_label = verdict_labels.get(verdict, "No concluyente")
+                verdict_class = (
+                        "positive" if verdict == "confirmed_false_positive"
+                        else "negative" if verdict == "confirmed_vulnerability"
+                        else "unknown"
+                )
                 confidence = triage.get("confidence_score", "-")
                 instances = alert.get("instances", [])
+                supporting_evidence = triage.get("supporting_evidence", [])
+                missing_evidence = triage.get("missing_evidence", [])
+                recommended_test = triage.get("recommended_test", "No disponible")
+                dynamic_effect = triage.get("dynamic_effect_observed")
+                supporting_text = "".join(
+                        f"<li>{_html_value(item)}</li>" for item in supporting_evidence
+                ) or "<li>No se indicó evidencia de soporte.</li>"
+                missing_text = "".join(
+                        f"<li>{_html_value(item)}</li>" for item in missing_evidence
+                ) or "<li>No se indicó evidencia ausente.</li>"
                 instance_rows = "".join(
                         f"<li><strong>URI:</strong> {_html_value(instance.get('uri'))} "
                         f"<strong>Parámetro:</strong> {_html_value(instance.get('param'))} "
@@ -44,12 +63,16 @@ def generate_html_report(alerts, output_file):
                         <span class="verdict {verdict_class}">{verdict_label}</span>
                     </div>
                     <div class="meta"><span>Confianza: <strong>{_html_value(confidence)}%</strong></span>
-                        <span>Instancias: <strong>{len(instances)}</strong></span></div>
+                        <span>Instancias: <strong>{len(instances)}</strong></span>
+                        <span>Efecto dinámico: <strong>{'Sí' if dynamic_effect is True else 'No' if dynamic_effect is False else 'No indicado'}</strong></span></div>
                     <p>{_html_value(alert.get('desc', 'Sin descripción técnica'))}</p>
                     <details>
                         <summary>Ver evidencia detectada</summary>
                         <ul>{instance_rows}</ul>
                     </details>
+                    <div class="justification"><strong>Evidencia de soporte:</strong><ul>{supporting_text}</ul></div>
+                    <div class="justification"><strong>Evidencia faltante:</strong><ul>{missing_text}</ul></div>
+                    <div class="justification"><strong>Prueba recomendada:</strong> {_html_value(recommended_test)}</div>
                     <div class="justification"><strong>Justificación de IA:</strong>
                         {_html_value(triage.get('justification', 'No disponible'))}</div>
                 </article>
@@ -65,7 +88,7 @@ def generate_html_report(alerts, output_file):
         :root {{ color-scheme: light; font-family: system-ui, sans-serif; color: #172033; background: #f4f6f8; }}
         body {{ max-width: 1100px; margin: 0 auto; padding: 32px 20px; }}
         header {{ margin-bottom: 24px; }} h1 {{ margin-bottom: 6px; }}
-        .summary {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; }}
+        .summary {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }}
         .metric, .finding {{ background: white; border: 1px solid #dce2e8; border-radius: 8px; padding: 18px; box-shadow: 0 2px 8px #1720330d; }}
         .metric strong {{ display: block; font-size: 1.8rem; margin-top: 4px; }}
         .finding {{ margin-bottom: 16px; }} .finding-header {{ display: flex; justify-content: space-between; gap: 16px; align-items: start; }}
@@ -82,8 +105,9 @@ def generate_html_report(alerts, output_file):
     <header><h1>Reporte de triaje OWASP ZAP</h1><p>Evaluación automatizada de alertas con OpenAI.</p></header>
     <section class="summary" aria-label="Resumen">
         <div class="metric">Alertas analizadas<strong>{len(alerts)}</strong></div>
-        <div class="metric">Posibles falsos positivos<strong>{false_positives}</strong></div>
-        <div class="metric">Alertas de alto riesgo<strong>{high_risk}</strong></div>
+        <div class="metric">Falsos positivos confirmados<strong>{verdict_counts["confirmed_false_positive"]}</strong></div>
+        <div class="metric">Vulnerabilidades confirmadas<strong>{verdict_counts["confirmed_vulnerability"]}</strong></div>
+        <div class="metric">No concluyente<strong>{verdict_counts["inconclusive"]}</strong></div>
     </section>
     <main>{''.join(rows) or '<p>No se encontraron alertas.</p>'}</main>
 </body>
@@ -135,10 +159,18 @@ def analyze_alerts(report_path, output_file):
 
         # PROMPT MAESTRO CONSOLIDADO
         prompt = f"""
-        Actúa como un experto senior en seguridad de aplicaciones web (Pentester / Ingeniero DevSecOps). 
-        Tu tarea es auditar una alerta de seguridad generada por el escáner dinámico OWASP ZAP y dictaminar si existe una alta probabilidad de que sea un FALSO POSITIVO.
+        Actúa como experto senior en seguridad de aplicaciones web.
+        Audita la alerta OWASP ZAP y asigna exactamente uno de estos estados:
+        - confirmed_false_positive
+        - confirmed_vulnerability
+        - inconclusive
 
-        Analiza cuidadosamente los datos del escaneo que se te proporcionan a continuación:
+        No declares vulnerabilidad confirmada por un HTTP 500, un payload
+genérico o la ausencia de una protección aislada. No declares falso positivo
+confirmado si falta evidencia dinámica. Si no hay pruebas suficientes,
+usa inconclusive.
+
+        Analiza los datos siguientes:
 
         =========================================
         DATOS DE LA ALERTA DE OWASP ZAP
@@ -154,17 +186,22 @@ def analyze_alerts(report_path, output_file):
         =========================================
 
         Criterios de evaluación:
-        1. Evalúa si el payload utilizado en la evidencia realmente representa una amenaza para una aplicación moderna o si el comportamiento del servidor web pudo haber confundido al escáner automatizado.
-        2. Analiza el endpoint (URI) y el parámetro afectado. ¿Tiene sentido lógico que ocurra este tipo de vulnerabilidad ahí?
-        3. Si la evidencia contiene códigos de estado HTTP comunes o payloads genéricos que no ejecutaron código real, aumenta la sospecha de Falso Positivo.
+        1. Prioriza efecto observable sobre evidencia teórica.
+        2. Una reflexión o ejecución real debe identificar qué ocurrió.
+        3. Un 500, payload genérico o modificación de cabecera no confirma explotación.
+        4. La ausencia de evidencia debe producir inconclusive.
 
-        Debes responder ESTRICTAMENTE con un objeto JSON válido. No agregues introducciones, saludos ni bloques de código de marcado (como ```json). Sigue rigurosamente esta estructura:
+        Responde estrictamente con este JSON:
 
         {{
           "vulnerability": "{alert_name}",
-          "is_false_positive": true/false,
-          "confidence_score": 85,
-          "justification": "Explicación técnica, concisa y clara basada en la evidencia proporcionada."
+          "verdict": "confirmed_false_positive|confirmed_vulnerability|inconclusive",
+          "confidence_score": 0,
+          "dynamic_effect_observed": true/false,
+          "supporting_evidence": ["Evidencia concreta"],
+          "missing_evidence": ["Evidencia necesaria"],
+          "recommended_test": "Siguiente prueba segura",
+          "justification": "Explicación técnica basada únicamente en los datos"
         }}
         """
 
@@ -184,7 +221,23 @@ def analyze_alerts(report_path, output_file):
             
             # Convertir la respuesta de texto estructurado de la IA a formato JSON nativo de Python
             ai_decision = json.loads(ai_response_text)
-            print(f"   ↳ Veredicto -> ¿Falso Positivo?: {ai_decision.get('is_false_positive')} | Certeza: {ai_decision.get('confidence_score')}%")
+            allowed_verdicts = {
+                "confirmed_false_positive",
+                "confirmed_vulnerability",
+                "inconclusive",
+            }
+            if ai_decision.get("verdict") not in allowed_verdicts:
+                ai_decision["verdict"] = "inconclusive"
+            confidence = ai_decision.get("confidence_score", 0)
+            try:
+                confidence = max(0, min(100, int(confidence)))
+            except (TypeError, ValueError):
+                confidence = 0
+            ai_decision["confidence_score"] = confidence
+            print(
+                f"   ↳ Veredicto: {ai_decision.get('verdict')} "
+                f"| Certeza: {ai_decision.get('confidence_score')}%"
+            )
             
             # Combinamos la alerta original con el análisis de la IA
             alert["ai_triage"] = ai_decision
