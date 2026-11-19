@@ -42,7 +42,7 @@ jobs:
         mkdir -p artifacts
         python -m pip install --upgrade pip
         python -m pip install bandit pip-audit
-        bandit -r . -x .git -f json -o artifacts/sast-bandit.json || bandit_status=$?
+        bandit -r . -x .git,zap/node_modules -f json -o artifacts/sast-bandit.json || bandit_status=$?
         pip-audit -r requirements.txt -f json -o artifacts/sast-pip-audit.json || pip_audit_status=$?
         python -m py_compile triage_vulner.py
         if [ "${bandit_status:-0}" -ne 0 ] || [ "${pip_audit_status:-0}" -ne 0 ]; then
@@ -140,20 +140,28 @@ jobs:
       run: |
         set -euo pipefail
         mkdir -p artifacts
+        ZAP_API_KEY=$(openssl rand -hex 16)
+        echo "ZAP_API_KEY=$ZAP_API_KEY" >> "$GITHUB_ENV"
         docker image prune --filter "dangling=true" -f >/dev/null 2>&1 || true
         container_id=$(docker run -d --name zap --network="host" --shm-size=2g --user root \
           -v "$(pwd):/zap/wrk/:rw" \
           "$ZAP_TUNED_IMAGE" zap.sh -daemon -host 0.0.0.0 -port 8090 \
-          -config api.key=tfm-zap-key \
+          -config api.key="$ZAP_API_KEY" \
           -config log.file=/zap/wrk/artifacts/zap-internal.log \
           -config scanner.threadsPerHost=1 \
           -config scanner.threadsPerScan=1 \
+          -config scanner.threadPerHost=1 \
+          -config scanner.threadPerScan=1 \
+          -config autoupdate.check_on_start=false \
+          -config autoupdate.install_addon_updates=false \
           -config autoUpdate.checkOnStart=false \
-          -config autoUpdate.installAddonUpdates=false)
+          -config autoUpdate.installAddonUpdates=false \
+          --health-cmd "curl -f http://127.0.0.1:8090/JSON/core/view/version/?apikey=$ZAP_API_KEY >/dev/null" \
+          --health-interval=30s --health-timeout=5s --health-start-period=15s --health-retries=3)
         echo "Contenedor ZAP: ${container_id}"
         for attempt in {1..60}; do
           if curl --silent --fail \
-            "http://127.0.0.1:8090/JSON/core/view/version/?apikey=tfm-zap-key"; then
+            "http://127.0.0.1:8090/JSON/core/view/version/?apikey=${ZAP_API_KEY}"; then
             echo
             docker exec zap mkdir -p /tmp/zap-chrome-profile
             docker exec zap sh -c 'rm -rf /tmp/zap-client-profile /tmp/zap-firefox-profile /root/.ZAP/zap-client-profile /root/.ZAP/firefox-profile 2>/dev/null || true'
@@ -180,6 +188,7 @@ jobs:
       if: env.EXPERIMENT_SCENARIO == 'tuned' || env.EXPERIMENT_SCENARIO == 'tuned-ai'
       env:
         ZAP_PROXY: http://127.0.0.1:8090
+        ZAP_API_KEY: ${{ env.ZAP_API_KEY }}
         TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
         TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
         BROWSER_WORKFLOW_REPORT: artifacts/browser-workflow.json
@@ -187,6 +196,8 @@ jobs:
 
     - name: Run OWASP ZAP Tuned Scan
       if: env.EXPERIMENT_SCENARIO == 'tuned' || env.EXPERIMENT_SCENARIO == 'tuned-ai'
+      env:
+        ZAP_API_KEY: ${{ env.ZAP_API_KEY }}
       run: |
         set -euo pipefail
         mkdir -p artifacts
@@ -197,13 +208,13 @@ jobs:
         fi
         echo "Scanners activos configurados: ${scanner_ids}"
         curl --silent --show-error --fail \
-          "http://127.0.0.1:8090/JSON/ascan/action/disableAllScanners/?apikey=tfm-zap-key"
+          "http://127.0.0.1:8090/JSON/ascan/action/disableAllScanners/?apikey=${ZAP_API_KEY}"
         curl --silent --show-error --fail --get \
-          --data-urlencode "apikey=tfm-zap-key" \
+          --data-urlencode "apikey=${ZAP_API_KEY}" \
           --data-urlencode "ids=${scanner_ids}" \
           "http://127.0.0.1:8090/JSON/ascan/action/enableScanners/"
         curl --silent --show-error --fail \
-          "http://127.0.0.1:8090/JSON/ascan/view/scanners/?apikey=tfm-zap-key" \
+          "http://127.0.0.1:8090/JSON/ascan/view/scanners/?apikey=${ZAP_API_KEY}" \
           > artifacts/active-scanners.json
         target_regex=$(python - <<'PY'
         import os
@@ -216,36 +227,77 @@ jobs:
         PY
         )
         curl --silent --show-error --fail --get \
-          --data-urlencode "apikey=tfm-zap-key" \
+          --data-urlencode "apikey=${ZAP_API_KEY}" \
           --data-urlencode "contextName=target-context" \
           "http://127.0.0.1:8090/JSON/context/action/newContext/"
         curl --silent --show-error --fail --get \
-          --data-urlencode "apikey=tfm-zap-key" \
+          --data-urlencode "apikey=${ZAP_API_KEY}" \
           --data-urlencode "contextName=target-context" \
           --data-urlencode "regex=${target_regex}" \
           "http://127.0.0.1:8090/JSON/context/action/includeInContext/"
         curl --silent --show-error --fail --get \
-          --data-urlencode "apikey=tfm-zap-key" \
+          --data-urlencode "apikey=${ZAP_API_KEY}" \
+          --data-urlencode "contextName=target-context" \
+          --data-urlencode "regex=^https?://github\\.com(?:/.*)?$" \
+          "http://127.0.0.1:8090/JSON/context/action/excludeFromContext/"
+        curl --silent --show-error --fail --get \
+          --data-urlencode "apikey=${ZAP_API_KEY}" \
           --data-urlencode "url=${TARGET_URL}" \
           --data-urlencode "recurse=true" \
           --data-urlencode "inScopeOnly=true" \
           "http://127.0.0.1:8090/JSON/ascan/action/scan/"
         while true; do
           status=$(curl --silent --show-error --fail \
-            "http://127.0.0.1:8090/JSON/ascan/view/status/?apikey=tfm-zap-key" |
+            "http://127.0.0.1:8090/JSON/ascan/view/status/?apikey=${ZAP_API_KEY}" |
             python -c 'import json, sys; print(json.load(sys.stdin)["status"])')
           echo "Estado Active Scan: ${status}%"
           [ "${status}" = "100" ] && break
           sleep 5
         done
         curl --silent --show-error --fail \
-          "http://127.0.0.1:8090/OTHER/core/other/jsonreport/?apikey=tfm-zap-key" \
+          "http://127.0.0.1:8090/OTHER/core/other/jsonreport/?apikey=${ZAP_API_KEY}" \
           > "artifacts/zap-${EXPERIMENT_SCENARIO}.json"
         curl --silent --show-error --fail \
-          "http://127.0.0.1:8090/OTHER/core/other/htmlreport/?apikey=tfm-zap-key" \
+          "http://127.0.0.1:8090/OTHER/core/other/htmlreport/?apikey=${ZAP_API_KEY}" \
           > "artifacts/zap-${EXPERIMENT_SCENARIO}.html"
         test -s "artifacts/zap-${EXPERIMENT_SCENARIO}.json"
       continue-on-error: true
+
+    - name: Filter ZAP report to target origin
+      if: env.EXPERIMENT_SCENARIO == 'tuned' || env.EXPERIMENT_SCENARIO == 'tuned-ai'
+      run: |
+        python - <<'PY'
+        import json
+        import os
+        from urllib.parse import urlparse
+
+        report_path = f"artifacts/zap-{os.environ['EXPERIMENT_SCENARIO']}.json"
+        target = urlparse(os.environ["TARGET_URL"])
+        target_origin = f"{target.scheme}://{target.netloc}"
+
+        with open(report_path, "r", encoding="utf-8") as source:
+            report = json.load(source)
+
+        filtered_sites = []
+        for site in report.get("site", []):
+            site_name = site.get("@name", "")
+            if site_name == target_origin or site_name.startswith(target_origin + "/"):
+                filtered_sites.append(site)
+        report["site"] = filtered_sites
+
+        with open(report_path, "w", encoding="utf-8") as destination:
+            json.dump(report, destination, ensure_ascii=False, indent=2)
+        PY
+
+    - name: Capture Juice Shop challenge ground truth
+      if: env.EXPERIMENT_SCENARIO == 'tuned' || env.EXPERIMENT_SCENARIO == 'tuned-ai'
+      env:
+        TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
+        TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
+      run: |
+        curl --silent --show-error --fail \
+          "$TARGET_URL/api/Challenges/" \
+          > artifacts/challenges.json
 
     - name: Save ZAP logs
       if: always() && (env.EXPERIMENT_SCENARIO == 'tuned' || env.EXPERIMENT_SCENARIO == 'tuned-ai')
@@ -320,6 +372,9 @@ jobs:
         dom_xss_evidence=null
         persistent_xss_evidence=null
         xss_challenge_events=[]
+        sqli_effect_observed=false
+        sqli_status=null
+        sqli_evidence=null
         if [ "$EXPERIMENT_SCENARIO" = "tuned" ] || [ "$EXPERIMENT_SCENARIO" = "tuned-ai" ]; then
           browser_seed_enabled=true
           authenticated_workflow_enabled=true
@@ -350,6 +405,9 @@ jobs:
           dom_xss_evidence=$(python -c 'import json; print(json.dumps(json.load(open("artifacts/browser-workflow.json")).get("domXssEvidence")))')
           persistent_xss_evidence=$(python -c 'import json; print(json.dumps(json.load(open("artifacts/browser-workflow.json")).get("persistentXssEvidence")))')
           xss_challenge_events=$(python -c 'import json; print(json.dumps(json.load(open("artifacts/browser-workflow.json")).get("xssChallengeEvents", [])))')
+          sqli_effect_observed=$(python -c 'import json; print(str(json.load(open("artifacts/browser-workflow.json")).get("sqliEffectObserved", False)).lower())')
+          sqli_status=$(python -c 'import json; print(json.dumps(json.load(open("artifacts/browser-workflow.json")).get("sqliStatus")))')
+          sqli_evidence=$(python -c 'import json; print(json.dumps(json.load(open("artifacts/browser-workflow.json")).get("sqliEvidence")))')
         fi
         cat > artifacts/metadata.json <<EOF
         {
@@ -388,6 +446,9 @@ jobs:
           "dom_xss_evidence": ${dom_xss_evidence},
           "persistent_xss_evidence": ${persistent_xss_evidence},
           "xss_challenge_events": ${xss_challenge_events},
+          "sqli_effect_observed": ${sqli_effect_observed},
+          "sqli_status": ${sqli_status},
+          "sqli_evidence": ${sqli_evidence},
           "ai_enabled": $([ "$EXPERIMENT_SCENARIO" = "tuned-ai" ] && echo true || echo false)
         }
         EOF
