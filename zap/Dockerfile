@@ -1,23 +1,17 @@
 FROM zaproxy/zap-stable
 
 USER root
-ARG GECKODRIVER_VERSION=0.36.0
-ENV MOZ_DISABLE_CONTENT_SANDBOX=1
-ENV MOZ_DISABLE_RDD_SANDBOX=1
-ENV MOZ_HEADLESS=1
-ENV MOZ_WEBRENDER=0
-ENV HOME=/tmp/zap-firefox-home
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl firefox-esr; \
-    mkdir -p /root/.ZAP /tmp/zap-firefox-home /zap/wrk/artifacts; \
-    chmod 0700 /root/.ZAP /tmp/zap-firefox-home /zap/wrk/artifacts; \
-    curl --fail --silent --show-error --location \
-        "https://github.com/mozilla/geckodriver/releases/download/v${GECKODRIVER_VERSION}/geckodriver-v${GECKODRIVER_VERSION}-linux64.tar.gz" \
-        --output /tmp/geckodriver.tar.gz; \
-    tar --extract --gzip --file /tmp/geckodriver.tar.gz --directory /usr/local/bin; \
-    chmod 0755 /usr/local/bin/geckodriver; \
-    rm -f /tmp/geckodriver.tar.gz; \
-    firefox --version; \
-    geckodriver --version; \
+    apt-get install -y --no-install-recommends ca-certificates curl chromium chromium-driver; \
+    mkdir -p /root/.ZAP /tmp/zap-chrome-profile /zap/wrk/artifacts; \
+    chmod 0700 /root/.ZAP /tmp/zap-chrome-profile /zap/wrk/artifacts; \
+    mv /usr/bin/chromium /usr/bin/chromium.real; \
+    printf '%s\n' \
+        '#!/bin/sh' \
+        'exec /usr/bin/chromium.real --no-sandbox --disable-dev-shm-usage --disable-gpu "$@"' \
+        > /usr/bin/chromium; \
+    chmod 0755 /usr/bin/chromium; \
+    chromium --version; \
+    chromedriver --version; \
     rm -rf /var/lib/apt/lists/*

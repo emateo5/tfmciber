@@ -98,7 +98,7 @@ la API REST. Los resultados se publican como `reflectedXss`, `domXss` y
 `persistentXss` en `browser-workflow.json`.
 
 Los escenarios `tuned` y `tuned-ai` usan una imagen ZAP derivada con
-`firefox-esr`, además de un navegador Playwright a través del
+Chromium/Chromedriver, además de un navegador Playwright a través del
 proxy de ZAP para descubrir rutas y peticiones XHR generadas por JavaScript
 antes del Active Scan. Esto mejora la cobertura de APIs de una SPA, aunque no
 garantiza la cobertura completa

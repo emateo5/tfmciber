@@ -31,7 +31,7 @@ jobs:
       EXPERIMENT_SCENARIO: ${{ github.event_name == 'workflow_dispatch' && inputs.experiment_scenario || 'baseline' }}
       TARGET_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.target_url || 'http://localhost:3000' }}
       ZAP_IMAGE: zaproxy/zap-stable
-      ZAP_TUNED_IMAGE: tfmciber/zap-firefox:2.17.0
+      ZAP_TUNED_IMAGE: tfmciber/zap-chromium:2.17.0
 
     steps:
     - name: Checkout repository code
@@ -123,7 +123,7 @@ jobs:
       with:
         node-version: '22'
 
-    - name: Build ZAP image with Firefox
+    - name: Build ZAP image with Chromium
       if: env.EXPERIMENT_SCENARIO == 'tuned' || env.EXPERIMENT_SCENARIO == 'tuned-ai'
       run: |
         set -o pipefail
@@ -145,7 +145,7 @@ jobs:
           "$ZAP_TUNED_IMAGE" zap.sh -daemon -host 0.0.0.0 -port 8090 \
           -config api.key=tfm-zap-key \
           -config log.file=/zap/wrk/artifacts/zap-internal.log \
-          -config rules.domxss.browserid=firefox-headless \
+          -config rules.domxss.browserid=chrome-headless \
           -config autoUpdate.checkOnStart=false \
           -config autoUpdate.installAddonUpdates=false)
         echo "Contenedor ZAP: ${container_id}"
@@ -153,14 +153,14 @@ jobs:
           if curl --silent --fail \
             "http://127.0.0.1:8090/JSON/core/view/version/?apikey=tfm-zap-key"; then
             echo
-            docker exec zap mkdir -p /tmp/zap-firefox-home
-            docker exec zap sh -c 'timeout 30 firefox-esr --headless --screenshot /tmp/firefox-check.png about:blank >/tmp/firefox-check.log 2>&1; echo $?' \
-              > artifacts/firefox-headless-check.txt
-            docker exec zap cat /tmp/firefox-check.log > artifacts/firefox-headless.log 2>&1 || true
-            docker exec zap geckodriver --version > artifacts/geckodriver-check.txt 2>&1 || true
-            docker exec zap sh -c 'timeout 30 geckodriver --binary /usr/bin/firefox-esr --port 4445 >/tmp/geckodriver-check.log 2>&1 & driver_pid=$!; sleep 3; curl --silent --fail http://127.0.0.1:4445/status >/tmp/geckodriver-status.json 2>/dev/null || true; kill $driver_pid >/dev/null 2>&1 || true; wait $driver_pid >/dev/null 2>&1 || true' || true
-            docker exec zap cat /tmp/geckodriver-check.log > artifacts/geckodriver-check.log 2>&1 || true
-            docker exec zap cat /tmp/geckodriver-status.json > artifacts/geckodriver-status.json 2>&1 || true
+            docker exec zap mkdir -p /tmp/zap-chrome-profile
+            docker exec zap sh -c 'timeout 30 chromium --headless=new --no-sandbox --disable-dev-shm-usage --screenshot=/tmp/chrome-check.png about:blank >/tmp/chrome-headless.log 2>&1; echo $?' \
+              > artifacts/chrome-headless-check.txt
+            docker exec zap cat /tmp/chrome-headless.log > artifacts/chrome-headless.log 2>&1 || true
+            docker exec zap chromedriver --version > artifacts/chromedriver-check.txt 2>&1 || true
+            docker exec zap sh -c 'timeout 30 chromedriver --port=4445 --allowed-ips= >/tmp/chromedriver-check.log 2>&1 & driver_pid=$!; sleep 3; curl --silent --fail http://127.0.0.1:4445/status >/tmp/chromedriver-status.json 2>/dev/null || true; kill $driver_pid >/dev/null 2>&1 || true; wait $driver_pid >/dev/null 2>&1 || true' || true
+            docker exec zap cat /tmp/chromedriver-check.log > artifacts/chromedriver-check.log 2>&1 || true
+            docker exec zap cat /tmp/chromedriver-status.json > artifacts/chromedriver-status.json 2>&1 || true
             exit 0
           fi
           sleep 2
