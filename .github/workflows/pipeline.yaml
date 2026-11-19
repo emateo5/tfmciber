@@ -144,6 +144,8 @@ jobs:
         echo "ZAP_API_KEY=$ZAP_API_KEY" >> "$GITHUB_ENV"
         docker image prune --filter "dangling=true" -f >/dev/null 2>&1 || true
         container_id=$(docker run -d --name zap --network="host" --shm-size=2g --user root \
+          --health-cmd "curl -f http://127.0.0.1:8090/JSON/core/view/version/?apikey=$ZAP_API_KEY >/dev/null" \
+          --health-interval=30s --health-timeout=5s --health-start-period=15s --health-retries=3 \
           -v "$(pwd):/zap/wrk/:rw" \
           "$ZAP_TUNED_IMAGE" zap.sh -daemon -host 0.0.0.0 -port 8090 \
           -config api.key="$ZAP_API_KEY" \
@@ -153,11 +155,7 @@ jobs:
           -config scanner.threadPerHost=1 \
           -config scanner.threadPerScan=1 \
           -config autoupdate.check_on_start=false \
-          -config autoupdate.install_addon_updates=false \
-          -config autoUpdate.checkOnStart=false \
-          -config autoUpdate.installAddonUpdates=false \
-          --health-cmd "curl -f http://127.0.0.1:8090/JSON/core/view/version/?apikey=$ZAP_API_KEY >/dev/null" \
-          --health-interval=30s --health-timeout=5s --health-start-period=15s --health-retries=3)
+          -config autoupdate.install_addon_updates=false)
         echo "Contenedor ZAP: ${container_id}"
         for attempt in {1..60}; do
           if curl --silent --fail \
