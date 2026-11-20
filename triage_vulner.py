@@ -9,7 +9,9 @@ def _html_value(value):
     return escape(str("" if value is None else value))
 
 
-def generate_html_report(alerts, output_file):
+def generate_html_report(alerts, output_file, zap_alert_count=None):
+        zap_alert_count = len(alerts) if zap_alert_count is None else zap_alert_count
+        unprocessed_count = max(0, zap_alert_count - len(alerts))
         verdict_counts = {
                 "confirmed_false_positive": 0,
                 "confirmed_vulnerability": 0,
@@ -88,7 +90,7 @@ def generate_html_report(alerts, output_file):
         :root {{ color-scheme: light; font-family: system-ui, sans-serif; color: #172033; background: #f4f6f8; }}
         body {{ max-width: 1100px; margin: 0 auto; padding: 32px 20px; }}
         header {{ margin-bottom: 24px; }} h1 {{ margin-bottom: 6px; }}
-        .summary {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }}
+        .summary {{ display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 24px; }}
         .metric, .finding {{ background: white; border: 1px solid #dce2e8; border-radius: 8px; padding: 18px; box-shadow: 0 2px 8px #1720330d; }}
         .metric strong {{ display: block; font-size: 1.8rem; margin-top: 4px; }}
         .finding {{ margin-bottom: 16px; }} .finding-header {{ display: flex; justify-content: space-between; gap: 16px; align-items: start; }}
@@ -104,7 +106,9 @@ def generate_html_report(alerts, output_file):
 <body>
     <header><h1>Reporte de triaje OWASP ZAP</h1><p>Evaluación automatizada de alertas con OpenAI.</p></header>
     <section class="summary" aria-label="Resumen">
+        <div class="metric">Alertas ZAP<strong>{zap_alert_count}</strong></div>
         <div class="metric">Alertas analizadas<strong>{len(alerts)}</strong></div>
+        <div class="metric">No procesadas por IA<strong>{unprocessed_count}</strong></div>
         <div class="metric">Falsos positivos confirmados<strong>{verdict_counts["confirmed_false_positive"]}</strong></div>
         <div class="metric">Vulnerabilidades confirmadas<strong>{verdict_counts["confirmed_vulnerability"]}</strong></div>
         <div class="metric">No concluyente<strong>{verdict_counts["inconclusive"]}</strong></div>
@@ -245,9 +249,26 @@ usa inconclusive.
 
         except Exception as e:
             print(f"⚠️ Error al conectar o procesar con OpenAI para la alerta {alert_name}: {e}")
+            ai_decision = {
+                "verdict": "inconclusive",
+                "confidence_score": 0,
+                "dynamic_effect_observed": False,
+                "supporting_evidence": [
+                    f"OWASP ZAP reportó la alerta {alert_name}",
+                    f"Instancias disponibles: {len(instances)}",
+                ],
+                "missing_evidence": [
+                    "Respuesta válida del triaje con OpenAI",
+                    "Evidencia dinámica confirmada",
+                ],
+                "recommended_test": "Revisar manualmente la evidencia de ZAP y ejecutar una prueba controlada.",
+                "justification": f"No fue posible completar el triaje con OpenAI: {str(e)}",
+            }
+            alert["ai_triage"] = ai_decision
+            verified_alerts.append(alert)
 
     # Exportar el reporte auditado como HTML autocontenido
-    generate_html_report(verified_alerts, output_file)
+    generate_html_report(verified_alerts, output_file, zap_alert_count=len(all_alerts))
     
     print(f"\n💾 ¡Triaje completado con éxito! El reporte consolidado se guardó en: {output_file}")
 
