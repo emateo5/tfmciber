@@ -351,6 +351,10 @@ jobs:
         sqli_effect_observed=false
         sqli_status=null
         sqli_evidence=null
+        ai_enabled=false
+        if [ "$EXPERIMENT_SCENARIO" = "tuned-ai" ] || [ "$EXPERIMENT_SCENARIO" = "baseline" ]; then
+          ai_enabled=true
+        fi
         if [ "$EXPERIMENT_SCENARIO" = "tuned" ] || [ "$EXPERIMENT_SCENARIO" = "tuned-ai" ]; then
           browser_seed_enabled=true
           authenticated_workflow_enabled=true
@@ -425,7 +429,7 @@ jobs:
           "sqli_effect_observed": ${sqli_effect_observed},
           "sqli_status": ${sqli_status},
           "sqli_evidence": ${sqli_evidence},
-          "ai_enabled": $([ "$EXPERIMENT_SCENARIO" = "tuned-ai" ] && echo true || echo false)
+          "ai_enabled": ${ai_enabled}
         }
         EOF
 

@@ -1,8 +1,9 @@
-# tfmciber
+# Proyecto TFM
+Automatización de la búsqueda de vulnerabilidades en una web (XSS, SQLi, CSRF, etc.)
 
 ## Requisitos
 
-- Python 3.11 o posterior.
+- Python 3.11 o posterior
 - Las dependencias de Python de [`requirements.txt`](requirements.txt).
 - Una clave `OPENAI_API_KEY` si se ejecuta el triaje con IA.
 - Docker y una cuenta de GitHub con permisos para ejecutar Actions si se
@@ -26,7 +27,8 @@ export OPENAI_API_KEY=tu_clave
 python triage_vulner.py --report zap_report.json
 ```
 
-El resultado se guarda en `verified_alerts.html`. Para indicar otra ruta:
+Al ejecutar el script se genera `verified_alerts.html` en el directorio actual.
+Para indicar otra ruta:
 
 ```bash
 python triage_vulner.py --report zap_report.json --output resultados/triage.html
@@ -84,6 +86,24 @@ Los escenarios `baseline` y `tuned-ai` generan también
 `verified-<escenario>.html` cuando se ejecuta la etapa de IA. `stock` solo
 genera los informes JSON/HTML bruto del escaneo y los resultados SAST; `tuned`
 añade además los artefactos del descubrimiento y del Active Scan afinado.
+
+Los archivos visibles en el artefacto de una ejecución `tuned-ai` pueden
+incluir:
+
+- `active-scanners.json`: escáneres habilitados por ZAP.
+- `browser-workflow.json`: resultados de navegación, login, XSS, SQLi y CSRF.
+- `challenges.json`: estado de los desafíos de Juice Shop utilizado como
+  referencia externa.
+- `chrome-*` y `chromedriver-*`: diagnósticos de Chromium, Chromedriver y su
+  compatibilidad.
+- `docker-containers.txt`, `zap-container-inspect.json` y
+  `zap-image-inspect.json`: estado del entorno de contenedores.
+- `metadata.json`: parámetros y resultados resumidos de la ejecución.
+- `sast-bandit.json` y `sast-pip-audit.json`: informes SAST.
+- `verified-tuned-ai.html`: reporte generado por el triaje de IA.
+- `zap-tuned-ai.json` y `zap-tuned-ai.html`: informe bruto de ZAP en los dos
+  formatos publicados.
+- `zap.log`: registro consolidado del contenedor ZAP y sus eventos.
 
 La comparación principal del TFM es `stock` frente a `tuned` frente a
 `tuned-ai`. `tuned` y `tuned-ai` ejecutan exactamente la misma política; la
