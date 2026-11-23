@@ -37,12 +37,27 @@ generado y envía cada alerta a `gpt-4o-mini` para obtener una valoración de
 posible falso positivo. Si no se proporciona `OPENAI_API_KEY`, la ejecución no
 puede completar el triaje.
 
+El HTML incluye, para cada alerta, el veredicto (`confirmed_false_positive`,
+`confirmed_vulnerability` o `inconclusive`), la confianza normalizada entre
+0 y 100, el efecto dinámico observado, la evidencia disponible, la evidencia
+que falta y la siguiente prueba recomendada. El resultado de la IA es una
+ayuda para priorizar la revisión: no modifica ni sustituye el informe JSON
+original de ZAP.
+
 ## PoC experimental
 
 El workflow de GitHub Actions ejecuta SAST y DAST sobre una instancia limpia de
 OWASP Juice Shop. SAST usa Bandit y `pip-audit`; DAST usa OWASP ZAP. Los
 eventos `push` y `pull_request` ejecutan el escenario `baseline` como control
 operativo.
+
+En los eventos automáticos se utiliza siempre `http://localhost:3000` y no se
+requieren credenciales de prueba. En una ejecución manual
+(`workflow_dispatch`) se puede seleccionar `baseline`, `stock`, `tuned` o
+`tuned-ai` y proporcionar `target_url`. Los escenarios `baseline` y
+`tuned-ai` requieren además el secreto `OPENAI_API_KEY`; `tuned` y `tuned-ai`
+pueden usar `TEST_USERNAME` y `TEST_PASSWORD` para habilitar el flujo
+autenticado de Playwright.
 
 El escenario `baseline` también intenta ejecutar el triaje con IA, por lo que
 requiere configurar el secreto `OPENAI_API_KEY` en el repositorio. Los
@@ -63,10 +78,12 @@ Para ejecutar un escenario experimental manualmente:
 
 Los cuatro escenarios publican un artefacto `zap-experiment-<escenario>` con
 `metadata.json`, los informes SAST y los resultados de ZAP disponibles. Los
-escenarios `baseline`, `tuned` y `tuned-ai` guardan además
-`browser-workflow.json` cuando corresponde y un informe HTML de triaje
+escenarios `tuned` y `tuned-ai` guardan además `browser-workflow.json` y
+`zap.log`; `baseline` y `stock` no ejecutan el descubrimiento con navegador.
+Los escenarios `baseline` y `tuned-ai` generan también
 `verified-<escenario>.html` cuando se ejecuta la etapa de IA. `stock` solo
-genera los informes bruto JSON/HTML del escaneo y los resultados SAST.
+genera los informes JSON/HTML bruto del escaneo y los resultados SAST; `tuned`
+añade además los artefactos del descubrimiento y del Active Scan afinado.
 
 La comparación principal del TFM es `stock` frente a `tuned` frente a
 `tuned-ai`. `tuned` y `tuned-ai` ejecutan exactamente la misma política; la
@@ -137,6 +154,18 @@ imagen de ZAP, el commit y la URL objetivo.
 La política activa depende de los identificadores de reglas instalados en la
 imagen de ZAP. Si se cambia la imagen o sus addons, hay que volver a validar
 los IDs de [`zap/active-scan.conf`](zap/active-scan.conf).
+
+### Flujo de una ejecución
+
+1. Se valida `target_url` y se ejecutan Bandit y `pip-audit`.
+2. `baseline` usa el escaneo pasivo y `stock` el Active Scan predeterminado.
+3. `tuned` y `tuned-ai` construyen la imagen de ZAP con Chromium,
+   descubren rutas y peticiones SPA con Playwright y ejecutan el Active Scan
+   configurado en [`zap/active-scan.conf`](zap/active-scan.conf).
+4. `baseline` y `tuned-ai` procesan el JSON de ZAP con
+   [`triage_vulner.py`](triage_vulner.py) y publican el HTML de triaje.
+5. El workflow conserva los artefactos aunque una comprobación SAST o DAST
+   encuentre hallazgos, para permitir su revisión posterior.
 
 ## Usar otra URL
 
