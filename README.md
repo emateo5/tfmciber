@@ -15,37 +15,6 @@ Instala la dependencia de Python con:
 python -m pip install -r requirements.txt
 ```
 
-## Uso
-
-El script analiza un reporte JSON de OWASP ZAP y genera un reporte HTML autocontenido:
-
-```bash
-# Linux/macOS:
-export OPENAI_API_KEY=tu_clave
-# PowerShell:
-# $env:OPENAI_API_KEY = "tu_clave"
-python triage_vulner.py --report zap_report.json
-```
-
-Al ejecutar el script se genera `verified_alerts.html` en el directorio actual.
-Para indicar otra ruta:
-
-```bash
-python triage_vulner.py --report zap_report.json --output resultados/triage.html
-```
-
-El script no ejecuta ZAP ni realiza el escaneo: recibe un informe JSON ya
-generado y envía cada alerta a `gpt-4o-mini` para obtener una valoración de
-posible falso positivo. Si no se proporciona `OPENAI_API_KEY`, la ejecución no
-puede completar el triaje.
-
-El HTML incluye, para cada alerta, el veredicto (`confirmed_false_positive`,
-`confirmed_vulnerability` o `inconclusive`), la confianza normalizada entre
-0 y 100, el efecto dinámico observado, la evidencia disponible, la evidencia
-que falta y la siguiente prueba recomendada. El resultado de la IA es una
-ayuda para priorizar la revisión: no modifica ni sustituye el informe JSON
-original de ZAP.
-
 ## PoC experimental
 
 El workflow de GitHub Actions ejecuta SAST y DAST sobre una instancia limpia de
@@ -53,17 +22,11 @@ OWASP Juice Shop. SAST usa Bandit y `pip-audit`; DAST usa OWASP ZAP. Los
 eventos `push` y `pull_request` ejecutan el escenario `baseline` como control
 operativo.
 
-En los eventos automáticos se utiliza siempre `http://localhost:3000` y no se
-requieren credenciales de prueba. En una ejecución manual
-(`workflow_dispatch`) se puede seleccionar `baseline`, `stock`, `tuned` o
-`tuned-ai` y proporcionar `target_url`. Los escenarios `baseline` y
-`tuned-ai` requieren además el secreto `OPENAI_API_KEY`; `tuned` y `tuned-ai`
+Para la ejecución manual
+(`workflow_dispatch`) se puede seleccionar `stock`, `tuned` o
+`tuned-ai` y proporcionar `target_url`. El escenario `tuned-ai` requieren además el secreto `OPENAI_API_KEY`; `tuned` y `tuned-ai`
 pueden usar `TEST_USERNAME` y `TEST_PASSWORD` para habilitar el flujo
 autenticado de Playwright.
-
-El escenario `baseline` también intenta ejecutar el triaje con IA, por lo que
-requiere configurar el secreto `OPENAI_API_KEY` en el repositorio. Los
-escenarios `stock` y `tuned` no llaman a OpenAI; `tuned-ai` sí lo hace.
 
 Para ejecutar un escenario experimental manualmente:
 
@@ -76,13 +39,12 @@ Para ejecutar un escenario experimental manualmente:
 | `stock` | Active Scan | Predeterminada de ZAP | No |
 | `tuned` | Navegador Playwright + Active Scan | [`zap/active-scan.conf`](zap/active-scan.conf) | No |
 | `tuned-ai` | Navegador Playwright + Active Scan | [`zap/active-scan.conf`](zap/active-scan.conf) | Si |
-| `baseline` | Baseline pasivo | Predeterminada de ZAP | Si |
 
-Los cuatro escenarios publican un artefacto `zap-experiment-<escenario>` con
+Los tres escenarios publican un artefacto `zap-experiment-<escenario>` con
 `metadata.json`, los informes SAST y los resultados de ZAP disponibles. Los
 escenarios `tuned` y `tuned-ai` guardan además `browser-workflow.json` y
-`zap.log`; `baseline` y `stock` no ejecutan el descubrimiento con navegador.
-Los escenarios `baseline` y `tuned-ai` generan también
+`zap.log`; `stock` no ejecuta el descubrimiento con navegador.
+El escenario `tuned-ai` genera también
 `verified-<escenario>.html` cuando se ejecuta la etapa de IA. `stock` solo
 genera los informes JSON/HTML bruto del escaneo y los resultados SAST; `tuned`
 añade además los artefactos del descubrimiento y del Active Scan afinado.
@@ -111,19 +73,13 @@ La comparación principal del TFM es `stock` frente a `tuned` frente a
 revisar falsos positivos, pero no sustituye el resultado bruto de ZAP.
 
 La política afinada incluye SQL Injection y XSS reflejado/persistente.
-DOM XSS se valida dinámicamente con Playwright/Chromium porque el
-`DomXssScanRule` integrado no pudo ejecutarse de forma fiable en ZAP con
-Selenium en GitHub Actions. La detección de tokens CSRF es pasiva y no forma
-parte de la política de Active Scan; tampoco sustituye una prueba completa
-de explotación CSRF autenticada.
+DOM XSS se valida dinámicamente con Playwright/Chromium. 
 
 La prueba reflejada diferencia respuesta servidor y ejecución cliente:
 `responsePayloadReflected=false` con `payloadExecuted=true` se clasifica como
 ejecución DOM, no como XSS reflejado. La prueba SQLi solo se marca como
 confirmada si una consulta amplía los resultados o el login inyectado devuelve
 un token; un HTTP 500 se conserva como indicio, no como explotación.
-Los informes ZAP se filtran al origen objetivo y se excluye GitHub; los
-hallazgos pasivos externos no se incluyen en las métricas del TFM.
 
 Los escenarios afinados ejecutan una comprobación dinámica de CSRF mediante
 Playwright sobre el formulario de perfil de OWASP Juice Shop. Capturan el
@@ -182,8 +138,8 @@ los IDs de [`zap/active-scan.conf`](zap/active-scan.conf).
 3. `tuned` y `tuned-ai` construyen la imagen de ZAP con Chromium,
    descubren rutas y peticiones SPA con Playwright y ejecutan el Active Scan
    configurado en [`zap/active-scan.conf`](zap/active-scan.conf).
-4. `baseline` y `tuned-ai` procesan el JSON de ZAP con
-   [`triage_vulner.py`](triage_vulner.py) y publican el HTML de triaje.
+4. `tuned-ai` procesa el JSON de ZAP con
+   [`triage_vulner.py`](triage_vulner.py) y publica el HTML de triaje.
 5. El workflow conserva los artefactos aunque una comprobación SAST o DAST
    encuentre hallazgos, para permitir su revisión posterior.
 
@@ -215,3 +171,34 @@ Playwright. Si faltan, el descubrimiento continúa, pero el login y las
 comprobaciones que dependen del carrito se omiten. El navegador limita la
 navegación al mismo origen de `target_url` y procesa como máximo 150 páginas
 (`SPA_MAX_PAGES` permite cambiar ese límite).
+
+## Uso
+
+El script analiza un reporte JSON de OWASP ZAP y genera un reporte HTML autocontenido:
+
+```bash
+# Linux/macOS:
+export OPENAI_API_KEY=tu_clave
+# PowerShell:
+# $env:OPENAI_API_KEY = "tu_clave"
+python triage_vulner.py --report zap_report.json
+```
+
+Al ejecutar el script se genera `verified_alerts*.html` en el directorio actual.
+Para indicar otra ruta:
+
+```bash
+python triage_vulner.py --report zap_report.json --output resultados/triage.html
+```
+
+El script no ejecuta ZAP ni realiza el escaneo: recibe un informe JSON ya
+generado y envía cada alerta a `gpt-4o-mini` para obtener una valoración de
+posible falso positivo. Si no se proporciona `OPENAI_API_KEY`, la ejecución no
+puede completar el triaje.
+
+El HTML incluye, para cada alerta, el veredicto (`confirmed_false_positive`,
+`confirmed_vulnerability` o `inconclusive`), la confianza normalizada entre
+0 y 100, el efecto dinámico observado, la evidencia disponible, la evidencia
+que falta y la siguiente prueba recomendada. El resultado de la IA es una
+ayuda para priorizar la revisión: no modifica ni sustituye el informe JSON
+original de ZAP.
